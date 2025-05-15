@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>JustDance 누적 출석 랭킹</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+  <div class="container mx-auto p-6">
+    <!-- 상단 제목 -->
+    <h1 class="text-3xl font-bold mb-6 text-center">JustDance 누적 출석 랭킹</h1>
+
+    <!-- 랭킹 리스트 -->
+    <div class="space-y-4 mb-10">
+      {% for user in users %}
+      <div class="bg-white rounded-xl shadow p-4 flex items-center space-x-6 hover:shadow-lg transition">
+        <div class="text-2xl font-bold w-8 text-gray-500 text-center">#{{ user.rank }}</div>
+
+        <img src="{{ user.img }}" alt="{{ user.nickname }} 프로필"
+             class="w-16 h-16 rounded-full object-cover border border-gray-300 shadow-sm">
+
+        <div class="flex-1">
+          <div class="text-lg font-semibold">{{ user.nickname }}</div>
+          <div class="text-gray-500 text-sm">{{ user.comment or '한줄 소개 없음' }}</div>
+        </div>
+
+        <div class="text-right text-sm text-gray-600 whitespace-nowrap">
+          <div>누적 출석: <span class="font-medium text-gray-800">{{ user.total_count }}</span>회</div>
+          <div class="text-xs">마지막 접속: {{ user.last_attended.strftime('%Y-%m-%d %H:%M') }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- 유저 검색 -->
+    <div class="mb-12">
+      <h2 class="text-xl font-bold mb-2">유저 검색</h2>
+      <div class="flex space-x-2">
+        <input id="searchInput" type="text" placeholder="닉네임 입력..." class="flex-1 border px-4 py-2 rounded" />
+        <button id="searchBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">검색</button>
+      </div>
+      <div id="searchResult" class="mt-4"></div>
+    </div>
+
+    <!-- 날짜별 참여자 및 음악 -->
+    <h2 class="text-xl font-semibold mb-4">날짜별 참여자 및 재생 음악 보기</h2>
+    <input type="date" id="calendar" class="border px-4 py-2 rounded mb-4">
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="day-results">
+      <div>
+        <h3 class="text-lg font-bold mb-2">👥</h3>
+        <div id="participant-list" class="space-y-2"></div>
+      </div>
+      <div>
+        <h3 class="text-lg font-bold mb-2">🎶</h3>
+        <div id="music-list" class="space-y-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Script -->
+  <script>
+    const PROFILE_BASE = "/static/profiles";
+
+    // 날짜별 참여자 + 음악 조회
+    document.getElementById("calendar").addEventListener("change", async (e) => {
+      const date = e.target.value;
+      const participantRes = await fetch(`/participants?date=${date}`);
+      const musicRes = await fetch(`/music?date=${date}`);
+      const participants = await participantRes.json();
+      const musics = await musicRes.json();
+
+      const pList = document.getElementById("participant-list");
+      const mList = document.getElementById("music-list");
+      pList.innerHTML = "";
+      mList.innerHTML = "";
+
+      if (participants.length === 0) {
+        pList.innerHTML = "<div class='text-sm text-gray-500'>참여자가 없습니다.</div>";
+      } else {
+        participants.forEach((p, i) => {
+          const el = document.createElement("div");
+          el.className = "bg-white rounded-xl shadow p-4 flex items-center space-x-4";
+
+          const img = document.createElement("img");
+          img.src = p.img;
+          img.onerror = () => { img.src = PROFILE_BASE + "/default.png"; };
+          img.alt = `${p.nickname} 프로필`;
+          img.className = "w-12 h-12 rounded-full object-cover border";
+
+          el.innerHTML = `
+            <div class="text-lg font-bold w-6 text-gray-600">#${i + 1}</div>
+            ${img.outerHTML}
+            <div class="flex-1">
+              <div class="font-semibold">${p.nickname}</div>
+              <div class="text-sm text-gray-500">${p.comment || '한줄 소개 없음'}</div>
+            </div>
+            <div class="text-sm text-gray-700 text-right whitespace-nowrap">
+              누적 ${p.total_count}회<br>
+              체류 ${p.duration}분
+            </div>
+          `;
+          pList.appendChild(el);
+        });
+      }
+
+      if (musics.length === 0) {
+        mList.innerHTML = "<div class='text-sm text-gray-500'>재생된 음악이 없습니다.</div>";
+      } else {
+        musics.forEach(m => {
+          const el = document.createElement("div");
+          el.className = "bg-white rounded-xl shadow p-3";
+          el.innerHTML = `
+            <div class="text-sm text-gray-500">${m.played_at}</div>
+            <div class="font-semibold text-sm mt-1">${m.title}</div>
+            <div class="text-sm text-gray-600">by ${m.user}</div>
+          `;
+          mList.appendChild(el);
+        });
+      }
+    });
+
+    // 유저 검색
+    document.getElementById("searchBtn").addEventListener("click", async () => {
+      const name = document.getElementById("searchInput").value.trim();
+      const resultBox = document.getElementById("searchResult");
+      resultBox.innerHTML = "";
+
+      if (!name) return;
+
+      try {
+        const res = await fetch(`/user?nickname=${encodeURIComponent(name)}`);
+        if (!res.ok) throw new Error("유저를 찾을 수 없습니다");
+        const p = await res.json();
+
+        const card = document.createElement("div");
+        card.className = "bg-white rounded-xl shadow p-5 flex items-center space-x-6";
+
+        const img = document.createElement("img");
+        img.src = p.img;
+        img.onerror = () => { img.src = "/static/profiles/default.png"; };
+        img.alt = `${p.nickname} 프로필`;
+        img.className = "w-20 h-20 rounded-full object-cover border";
+
+        card.innerHTML = `
+          ${img.outerHTML}
+          <div class="flex-1">
+            <div class="text-xl font-bold">${p.nickname}</div>
+            <div class="text-sm text-gray-500">${p.comment || "한줄 소개 없음"}</div>
+            <div class="text-sm text-gray-600 mt-1">누적 출석: ${p.total_count}회</div>
+            <div class="text-sm text-gray-600">최근 접속: ${p.last_attended || "기록 없음"}</div>
+          </div>
+        `;
+
+        resultBox.appendChild(card);
+      } catch (err) {
+        resultBox.innerHTML = `<div class="text-sm text-red-500">[오류] ${err.message}</div>`;
+      }
+    });
+  </script>
+
+</body>
+</html>

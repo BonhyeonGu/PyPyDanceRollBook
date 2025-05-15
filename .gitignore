@@ -1,0 +1,4 @@
+__pycache__
+config.json
+web_config.json
+output_log*

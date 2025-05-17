@@ -121,6 +121,8 @@ def user_profile():
             if not result:
                 return jsonify({"error": "사용자 없음"}), 404
 
+            nickname = result[0]  # 실제 대소문자 포함된 닉네임 재지정
+
             img_filename = f"{nickname}.png"
             img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
             if not os.path.exists(img_path):

@@ -36,8 +36,14 @@
       {% endfor %}
     </div>
 
+    <!-- 인기곡 10선 -->
+    <div class="mt-16">
+      <h2 class="text-xl font-bold mb-4">최근 인기곡 (7 days)</h2>
+      <div id="popular-music" class="grid grid-cols-2 md:grid-cols-5 gap-4"></div>
+    </div>
+
     <!-- 유저 검색 -->
-    <div class="mb-12">
+    <div class="mt-16 mb-10">
       <h2 class="text-xl font-bold mb-2">유저 검색</h2>
       <div class="flex space-x-2">
         <input id="searchInput" type="text" placeholder="닉네임 입력..." class="flex-1 border px-4 py-2 rounded" />
@@ -61,6 +67,13 @@
       </div>
     </div>
   </div>
+
+  <!-- 복사 알림 -->
+  <div id="copyToast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-black text-white text-sm px-4 py-2 rounded z-50 opacity-0 pointer-events-none">
+    복사되었습니다.
+  </div>
+
+
 
   <!-- Script -->
   <script>
@@ -124,7 +137,61 @@
       }
     });
 
-    // 유저 검색
+    //인기노래
+    async function loadPopularMusic() {
+      
+      document.getElementById("copyToast").classList.add("hide");
+      const res = await fetch("/popular-music");
+      const data = await res.json();
+      const box = document.getElementById("popular-music");
+      box.innerHTML = "";
+
+      data.forEach((m, i) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "relative group";
+
+        const card = document.createElement("div");
+        card.className = "bg-white p-3 rounded shadow text-center text-sm truncate hover:shadow-lg cursor-pointer";
+        card.innerHTML = `
+          <div class="font-semibold truncate">${m.title}</div>
+          <div class="text-xs text-gray-500 mt-1">${m.count}회 재생</div>
+        `;
+
+        const tooltip = document.createElement("div");
+        tooltip.className = `
+          absolute left-1/2 -translate-x-1/2 bottom-full mb-2
+          bg-gray-800 text-white text-sm px-4 py-2 rounded
+          opacity-0 group-hover:opacity-100 transition-opacity duration-200
+          pointer-events-none z-50 w-[320px] text-center
+        `;
+        tooltip.textContent = m.title;
+
+        // ✅ 클릭 시 클립보드 복사 + 토스트 표시
+        card.addEventListener("click", () => {
+          navigator.clipboard.writeText(m.title).then(() => {
+            const toast = document.getElementById("copyToast");
+            toast.classList.remove("hide");
+            toast.classList.add("show");
+
+            setTimeout(() => {
+              toast.classList.remove("show");
+              toast.classList.add("hide");
+            }, 1500);
+          });
+        });
+
+        wrapper.appendChild(card);
+        wrapper.appendChild(tooltip);
+        box.appendChild(wrapper);
+      });
+
+
+    }
+
+
+    loadPopularMusic();
+
+    //유저 검색
     document.getElementById("searchBtn").addEventListener("click", async () => {
       const name = document.getElementById("searchInput").value.trim();
       const resultBox = document.getElementById("searchResult");
@@ -162,6 +229,32 @@
       }
     });
   </script>
+
+
+  <style>
+    #copyToast {
+      transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+    }
+
+    #copyToast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    #copyToast.hide {
+      opacity: 0;
+      transform: translate(-50%, 20px);
+    }
+  </style>
+
+
+  <footer class="mt-16 py-6 border-t text-center text-sm text-gray-500 bg-gray-50">
+    <p>
+      <a href="https://github.com/BonhyeonGu" target="_blank" class="text-blue-500 hover:underline">
+        @9Bon
+      </a>
+    </p>
+  </footer>
 
 </body>
 </html>

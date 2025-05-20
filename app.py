@@ -101,6 +101,27 @@ def music_by_date():
     finally:
         conn.close()
 
+@app.route("/popular-music")
+def popular_music():
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT title, COUNT(*) AS play_count
+                FROM music_play
+                WHERE played_at >= NOW() - INTERVAL 7 DAY
+                GROUP BY title
+                ORDER BY play_count DESC, MAX(played_at) DESC
+                LIMIT 10
+            """)
+            rows = cursor.fetchall()
+            return jsonify([
+                { "title": r[0], "count": r[1] }
+                for r in rows
+            ])
+    finally:
+        conn.close()
+
 @app.route("/user")
 def user_profile():
     nickname = request.args.get("nickname")

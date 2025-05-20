@@ -1,35 +1,57 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="ko" class="dark">
 <head>
   <meta charset="UTF-8">
   <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
   <title>죽지도않고또와버린저댄</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class' // 필수!
+    }
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   <meta name="robots" content="noindex, nofollow">
 </head>
-<body class="bg-gray-100 text-gray-800">
-
+<body class="bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-100">
   <div class="container mx-auto p-6">
+
+    <!-- 제목 및 다크모드 토글 버튼 (페이지 최상단) -->
+    <div class="w-full px-4 py-2 bg-white dark:bg-gray-800 shadow-sm flex justify-between items-center fixed top-0 left-0 z-50 h-14">
+      <!-- 좌측: 사이트 이름 -->
+      <div class="text-lg font-bold text-gray-800 dark:text-white">
+        죽지않고또와버린저댄
+      </div>
+
+      <!-- 우측: 다크모드 토글 버튼 -->
+      <button id="themeToggle" class="text-sm bg-gray-200 dark:bg-gray-700 dark:text-white px-3 py-1.5 rounded transition flex items-center space-x-2">
+        <span id="themeIcon">🌙</span>
+        <span id="themeText">다크모드 전환</span>
+      </button>
+    </div>
+
+    <!-- 버튼 위치 때문에 전체 페이지 아래에 여백 확보 -->
+    <div class="h-20"></div>
+
     <!-- 상단 제목 -->
-    <h1 class="text-3xl font-bold mb-6 text-center">JustDance 누적 출석 랭킹</h1>
+    <h1 class="text-xl font-bold mb-4">JustDance 누적 출석 랭킹</h1>
 
     <!-- 랭킹 리스트 -->
     <div class="space-y-4 mt-8">
       {% for user in users %}
-      <div class="bg-white rounded-xl shadow p-4 flex items-center space-x-6 hover:shadow-lg transition">
-        <div class="text-2xl font-bold w-8 text-gray-500 text-center">#{{ user.rank }}</div>
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center space-x-6 hover:shadow-lg transition-colors duration-300">
+        <div class="text-2xl font-bold w-8 text-gray-500 dark:text-gray-300 text-center">#{{ user.rank }}</div>
 
         <img src="{{ user.img }}" alt="{{ user.nickname }} 프로필"
-            class="w-16 h-16 rounded-full object-cover border border-gray-300 shadow-sm">
+            class="w-16 h-16 rounded-full object-cover border border-gray-300 dark:border-gray-600 shadow-sm">
 
         <div class="flex-1">
-          <div class="text-lg font-semibold">{{ user.nickname }}</div>
-          <div class="text-gray-500 text-sm">{{ user.comment or '한줄 소개 없음' }}</div>
+          <div class="text-lg font-semibold text-gray-800 dark:text-white">{{ user.nickname }}</div>
+          <div class="text-gray-500 dark:text-gray-300 text-sm">{{ user.comment or '한줄 소개 없음' }}</div>
         </div>
 
-        <div class="text-right text-sm text-gray-600 whitespace-nowrap">
-          <div>누적 출석: <span class="font-medium text-gray-800">{{ user.total_count }}</span>회</div>
+        <div class="text-right text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap">
+          <div>누적 출석: <span class="font-medium text-gray-800 dark:text-white">{{ user.total_count }}</span>회</div>
           <div class="text-xs">마지막 접속: {{ user.last_attended.strftime('%Y-%m-%d %H:%M') }}</div>
         </div>
       </div>
@@ -46,8 +68,8 @@
     <div class="mt-16">
       <h2 class="text-xl font-bold mb-2">유저 검색</h2>
       <div class="flex space-x-2">
-        <input id="searchInput" type="text" placeholder="닉네임 입력..." class="flex-1 border px-4 py-2 rounded" />
-        <button id="searchBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">검색</button>
+        <input id="searchInput" type="text" placeholder="닉네임 입력..." class="flex-1 border px-4 py-2 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 transition-colors duration-300" />
+        <button id="searchBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition">검색</button>
       </div>
       <div id="searchResult" class="mt-4 mb-4"></div>
     </div>
@@ -55,7 +77,7 @@
     <!-- 날짜별 참여자 및 음악 -->
     <div class="mt-16">
       <h2 class="text-xl font-semibold mb-4">날짜별 참여자 및 재생 음악 보기</h2>
-      <input type="date" id="calendar" class="border px-4 py-2 rounded mb-4">
+      <input type="date" id="calendar" class="border px-4 py-2 rounded mb-4 bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 transition-colors duration-300">
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="day-results">
         <div>
@@ -68,18 +90,40 @@
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- 복사 알림 -->
-  <div id="copyToast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-black text-white text-sm px-4 py-2 rounded z-50 opacity-0 pointer-events-none">
-    복사되었습니다.
-  </div>
-
-
+    <!-- 복사 알림 -->
+    <div id="copyToast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-black text-white text-sm px-4 py-2 rounded z-50 opacity-0 pointer-events-none transition-opacity duration-300">
+      복사되었습니다.
+    </div>
 
   <!-- Script -->
   <script>
     const PROFILE_BASE = "/static/profiles";
+
+    //다크모드
+    const themeIcon = document.getElementById("themeIcon");
+    const themeText = document.getElementById("themeText");
+
+    function applyThemeUI(isDark) {
+      themeIcon.textContent = isDark ? "☀️" : "🌙";
+      themeText.textContent = isDark ? "라이트모드 전환" : "다크모드 전환";
+    }
+
+    // 초기 설정
+    const savedTheme = localStorage.getItem("theme");
+    const isDarkInitial = savedTheme === "dark" || (!savedTheme && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    if (isDarkInitial) {
+      document.documentElement.classList.add("dark");
+    }
+    applyThemeUI(document.documentElement.classList.contains("dark"));
+
+    // 버튼 이벤트
+    const toggleBtn = document.getElementById("themeToggle");
+    toggleBtn.addEventListener("click", () => {
+      const isDark = document.documentElement.classList.toggle("dark");
+      localStorage.setItem("theme", isDark ? "dark" : "light");
+      applyThemeUI(isDark);
+    });
 
     // 날짜별 참여자 + 음악 조회
     document.getElementById("calendar").addEventListener("change", async (e) => {
@@ -95,26 +139,30 @@
       mList.innerHTML = "";
 
       if (participants.length === 0) {
-        pList.innerHTML = "<div class='text-sm text-gray-500'>참여자가 없습니다.</div>";
+        pList.innerHTML = "<div class='text-sm text-gray-500 dark:text-gray-400'>참여자가 없습니다.</div>";
       } else {
         participants.forEach((p, i) => {
           const el = document.createElement("div");
-          el.className = "bg-white rounded-xl shadow p-4 flex items-center space-x-4";
+          el.className = `
+            bg-white dark:bg-gray-800 text-gray-800 dark:text-white
+            rounded-xl shadow p-4 flex items-center space-x-4
+            transition-colors duration-300 min-h-24
+          `.trim();
 
           const img = document.createElement("img");
           img.src = p.img;
           img.onerror = () => { img.src = PROFILE_BASE + "/default.png"; };
           img.alt = `${p.nickname} 프로필`;
-          img.className = "w-12 h-12 rounded-full object-cover border";
+          img.className = "w-12 h-12 rounded-full object-cover border border-gray-300 dark:border-gray-600";
 
           el.innerHTML = `
-            <div class="text-lg font-bold w-6 text-gray-600">#${i + 1}</div>
+            <div class="text-lg font-bold w-6 text-gray-600 dark:text-gray-300">#${i + 1}</div>
             ${img.outerHTML}
             <div class="flex-1">
               <div class="font-semibold">${p.nickname}</div>
-              <div class="text-sm text-gray-500">${p.comment || '한줄 소개 없음'}</div>
+              <div class="text-sm text-gray-500 dark:text-gray-300">${p.comment || '한줄 소개 없음'}</div>
             </div>
-            <div class="text-sm text-gray-700 text-right whitespace-nowrap">
+            <div class="text-sm text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">
               누적 ${p.total_count}회<br>
               체류 ${p.duration}분
             </div>
@@ -124,15 +172,19 @@
       }
 
       if (musics.length === 0) {
-        mList.innerHTML = "<div class='text-sm text-gray-500'>재생된 음악이 없습니다.</div>";
+        mList.innerHTML = "<div class='text-sm text-gray-500 dark:text-gray-400'>재생된 음악이 없습니다.</div>";
       } else {
         musics.forEach(m => {
           const el = document.createElement("div");
-          el.className = "bg-white rounded-xl shadow p-3";
+          el.className = `
+            bg-white dark:bg-gray-800 text-gray-800 dark:text-white
+            rounded-xl shadow p-3 transition-colors duration-300 min-h-24
+          `.trim();
+
           el.innerHTML = `
-            <div class="text-sm text-gray-500">${m.played_at}</div>
+            <div class="text-sm text-gray-500 dark:text-gray-300">${m.played_at}</div>
             <div class="font-semibold text-sm mt-1">${m.title}</div>
-            <div class="text-sm text-gray-600">by ${m.user}</div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">by ${m.user}</div>
           `;
           mList.appendChild(el);
         });
@@ -141,7 +193,6 @@
 
     //인기노래
     async function loadPopularMusic() {
-      
       document.getElementById("copyToast").classList.add("hide");
       const res = await fetch("/popular-music");
       const data = await res.json();
@@ -153,22 +204,26 @@
         wrapper.className = "relative group";
 
         const card = document.createElement("div");
-        card.className = "bg-white p-3 rounded shadow text-center text-sm truncate hover:shadow-lg cursor-pointer";
+        card.className = `
+          bg-white dark:bg-gray-800 text-gray-800 dark:text-white
+          p-3 rounded shadow text-center text-sm truncate
+          hover:shadow-lg cursor-pointer transition-colors duration-300
+        `.trim();
         card.innerHTML = `
           <div class="font-semibold truncate">${m.title}</div>
-          <div class="text-xs text-gray-500 mt-1">${m.count}회 재생</div>
+          <div class="text-xs text-gray-500 dark:text-gray-300 mt-1">${m.count}회 재생</div>
         `;
 
         const tooltip = document.createElement("div");
         tooltip.className = `
           absolute left-1/2 -translate-x-1/2 bottom-full mb-2
-          bg-gray-800 text-white text-sm px-4 py-2 rounded
+          bg-gray-600 text-white text-sm px-4 py-2 rounded
           opacity-0 group-hover:opacity-100 transition-opacity duration-200
           pointer-events-none z-50 w-[320px] text-center
-        `;
+        `.trim();
         tooltip.textContent = m.title;
 
-        // ✅ 클릭 시 클립보드 복사 + 토스트 표시
+        // 클릭 시 클립보드 복사 + 토스트
         card.addEventListener("click", () => {
           navigator.clipboard.writeText(m.title).then(() => {
             const toast = document.getElementById("copyToast");
@@ -186,8 +241,6 @@
         wrapper.appendChild(tooltip);
         box.appendChild(wrapper);
       });
-
-
     }
 
 
@@ -207,21 +260,21 @@
         const p = await res.json();
 
         const card = document.createElement("div");
-        card.className = "bg-white rounded-xl shadow p-5 flex items-center space-x-6";
+        card.className = "bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-xl shadow p-5 flex items-center space-x-6 transition-colors duration-300";
 
         const img = document.createElement("img");
         img.src = p.img;
         img.onerror = () => { img.src = "/static/profiles/default.png"; };
         img.alt = `${p.nickname} 프로필`;
-        img.className = "w-20 h-20 rounded-full object-cover border";
+        img.className = "w-20 h-20 rounded-full object-cover border border-gray-300 dark:border-gray-600";
 
         card.innerHTML = `
           ${img.outerHTML}
           <div class="flex-1">
             <div class="text-xl font-bold">${p.nickname}</div>
-            <div class="text-sm text-gray-500">${p.comment || "한줄 소개 없음"}</div>
-            <div class="text-sm text-gray-600 mt-1">누적 출석: ${p.total_count}회</div>
-            <div class="text-sm text-gray-600">최근 접속: ${p.last_attended || "기록 없음"}</div>
+            <div class="text-sm text-gray-500 dark:text-gray-300">${p.comment || "한줄 소개 없음"}</div>
+            <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">누적 출석: ${p.total_count}회</div>
+            <div class="text-sm text-gray-600 dark:text-gray-300">최근 접속: ${p.last_attended || "기록 없음"}</div>
           </div>
         `;
 
@@ -231,7 +284,6 @@
       }
     });
   </script>
-
 
   <style>
     #copyToast {
@@ -249,10 +301,10 @@
     }
   </style>
 
-
-  <footer class="mt-16 py-6 border-t text-center text-sm text-gray-500 bg-gray-50">
+  <footer class="mt-16 py-3 border-t text-center text-sm text-gray-800 dark:text-gray-100 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 transition-colors duration-300">
     <p>
-      <a href="https://github.com/BonhyeonGu" target="_blank" class="text-blue-500 hover:underline">
+      <a href="https://github.com/BonhyeonGu" target="_blank"
+        class="no-underline text-black dark:text-white hover:opacity-70 transition">
         @9Bon
       </a>
     </p>

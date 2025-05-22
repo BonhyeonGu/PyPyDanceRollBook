@@ -16,8 +16,8 @@ class PyPyDanceLogAnalyzer:
         # 정규식 패턴
         self.enter_room_pattern = re.compile(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2} .*?Entering Room: " + re.escape(self.room_name))
         self.leave_room_pattern = re.compile(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2} .*?(Successfully left room|Safe handle has been closed)")
-        self.join_pattern = re.compile(r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}) .*?OnPlayerJoinComplete ([^\s]+)")
-        self.left_pattern = re.compile(r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}) .*?OnPlayerLeft ([^\s]+)")
+        self.join_pattern = re.compile(r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}) .*?OnPlayerJoinComplete (.+)")
+        self.left_pattern = re.compile(r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}) .*?OnPlayerLeft (.+)")
         self.video_play_pattern = re.compile(
             r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}) .*?\[VRCX\] VideoPlay\(" + re.escape(self.room_name) + r"\) \"([^\"]+)\",.*?,\"([^\"]+)\""
         )

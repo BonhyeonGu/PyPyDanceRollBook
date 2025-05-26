@@ -153,12 +153,15 @@ def user_profile():
 
             # 2️⃣ 도전과제 목록 가져오기
             cursor.execute("""
-                SELECT a.name, a.description
+                SELECT a.name, a.description, DATE(ua.achieved_at)
                 FROM user_achievements ua
                 JOIN achievements a ON ua.achievement_id = a.achievement_id
                 WHERE ua.user_id = %s
             """, (user_id,))
-            achievements = [{"name": row[0], "description": row[1]} for row in cursor.fetchall()]
+            achievements = [
+                {"name": row[0], "description": row[1], "achieved_at": row[2].strftime("%Y-%m-%d")}
+                for row in cursor.fetchall()
+            ]
 
             # 3️⃣ 응답 JSON
             return jsonify({

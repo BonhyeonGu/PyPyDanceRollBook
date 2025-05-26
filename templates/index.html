@@ -286,7 +286,7 @@
         const p = await res.json();
 
         const card = document.createElement("div");
-        card.className = "bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-xl shadow p-5 flex items-center space-x-6 transition-colors duration-300";
+        card.className = "bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-xl shadow p-5 flex items-center justify-between space-x-6 transition-colors duration-300";
 
         const img = document.createElement("img");
         img.src = p.img;
@@ -294,8 +294,8 @@
         img.alt = `${p.nickname} 프로필`;
         img.className = "w-20 h-20 rounded-full object-cover border border-gray-300 dark:border-gray-600";
 
-        card.innerHTML = `
-          ${img.outerHTML}
+        // 중앙: 유저 정보
+        const infoHTML = `
           <div class="flex-1">
             <div class="text-xl font-bold">${p.nickname}</div>
             <div class="text-sm text-gray-500 dark:text-gray-300">${p.comment || "한줄 소개 없음"}</div>
@@ -304,11 +304,42 @@
           </div>
         `;
 
+        // 우측: 도전과제 아이콘들
+        let achHTML = "";
+        if (p.achievements && p.achievements.length > 0) {
+          achHTML += `<div class="flex flex-wrap gap-2 ml-4">`;
+          p.achievements.forEach(ach => {
+            achHTML += `
+              <div class="relative group">
+                <img src="/static/achievements/a_${ach.name}.png"
+                    alt="${ach.name} 아이콘"
+                    class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-pointer">
+                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2
+                            bg-black/90 text-white text-xs px-3 py-1 rounded shadow-lg
+                            opacity-0 group-hover:opacity-100 transition-opacity duration-200
+                            pointer-events-none z-50 whitespace-nowrap text-center">
+                  <div class="font-bold">${ach.name} (${ach.achieved_at})</div>
+                  <div class="text-[10px] mt-1">${ach.description}</div>
+                </div>
+              </div>
+            `;
+          });
+          achHTML += `</div>`;
+        }
+
+        // 카드에 이미지 + 유저정보 + 도전과제 나란히 배치
+        card.innerHTML = `
+          ${img.outerHTML}
+          ${infoHTML}
+          ${achHTML}
+        `;
+
         resultBox.appendChild(card);
       } catch (err) {
         resultBox.innerHTML = `<div class="text-sm text-red-500">[오류] ${err.message}</div>`;
       }
     });
+  
   </script>
 
   <style>

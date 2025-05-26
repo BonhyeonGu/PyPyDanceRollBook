@@ -50,6 +50,31 @@
           <div class="text-gray-500 dark:text-gray-300 text-sm">{{ user.comment or '한줄 소개 없음' }}</div>
         </div>
 
+        <!-- 도전과제 썸네일들 -->
+        <div class="flex space-x-2">
+          {% for ach in user.achievements %}
+          <div class="relative group">
+            <img src="/static/achievements/a_{{ ach.name }}.png"
+                alt="{{ ach.name }} 아이콘"
+                class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-pointer">
+
+            <!-- 툴팁: 색상, 그림자 강조 -->
+            <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2
+                        bg-black/90 text-white text-xs px-3 py-1 rounded shadow-xl ring-1 ring-white/20
+                        opacity-0 group-hover:opacity-100 transition-opacity duration-200
+                        pointer-events-none z-50 whitespace-nowrap text-center">
+              <div class="font-bold">
+                {{ ach.name }} ({{ ach.achieved_at }})
+              </div>
+              <div class="text-[10px] mt-1">
+                {{ ach.description }}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+
         <div class="text-right text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap">
           <div>누적 출석: <span class="font-medium text-gray-800 dark:text-white">{{ user.total_count }}</span>회</div>
           <div class="text-xs">마지막 접속: {{ user.last_attended.strftime('%Y-%m-%d %H:%M') }}</div>
@@ -57,6 +82,7 @@
       </div>
       {% endfor %}
     </div>
+
 
     <!-- 인기곡 10선 -->
     <div class="mt-16">

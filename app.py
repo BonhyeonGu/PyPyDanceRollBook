@@ -131,8 +131,9 @@ def user_profile():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
+            # 1️⃣ 사용자 기본 정보 가져오기
             cursor.execute("""
-                SELECT u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
+                SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
                 FROM users u
                 LEFT JOIN user_attendance_summary uas ON u.user_id = uas.user_id
                 WHERE u.nickname = %s
@@ -142,41 +143,89 @@ def user_profile():
             if not result:
                 return jsonify({"error": "사용자 없음"}), 404
 
-            nickname = result[0]  # 실제 대소문자 포함된 닉네임 재지정
+            user_id = result[0]
+            nickname = result[1]  # 실제 대소문자 포함된 닉네임 재지정
 
             img_filename = f"{nickname}.png"
             img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
             if not os.path.exists(img_path):
                 img_filename = "default.png"
 
+            # 2️⃣ 도전과제 목록 가져오기
+            cursor.execute("""
+                SELECT a.name, a.description
+                FROM user_achievements ua
+                JOIN achievements a ON ua.achievement_id = a.achievement_id
+                WHERE ua.user_id = %s
+            """, (user_id,))
+            achievements = [{"name": row[0], "description": row[1]} for row in cursor.fetchall()]
+
+            # 3️⃣ 응답 JSON
             return jsonify({
-                "nickname": result[0],
-                "comment": result[1],
-                "total_count": result[2],
-                "last_attended": result[3].strftime("%Y-%m-%d %H:%M") if result[3] else None,
-                "img": f"/static/profiles/{img_filename}"
+                "nickname": nickname,
+                "comment": result[2],
+                "total_count": result[3],
+                "last_attended": result[4].strftime("%Y-%m-%d %H:%M") if result[4] else None,
+                "img": f"/static/profiles/{img_filename}",
+                "achievements": achievements
             })
+
     finally:
         conn.close()
 
 @app.route("/")
 def index():
-    top_users = get_top_attendees()
-    formatted_users = []
-    for rank, user in enumerate(top_users, start=1):
-        nickname, comment, total_count, last_attended = user
-        img_path = os.path.join(PROFILE_IMG_DIR, f"{nickname}.png")
-        if not os.path.exists(img_path):
-            img_path = os.path.join(PROFILE_IMG_DIR, "default.png")
-        formatted_users.append({
-            "rank": rank,
-            "nickname": nickname,
-            "comment": comment,
-            "total_count": total_count,
-            "last_attended": last_attended,
-            "img": f"/{img_path}"
-        })
-    return render_template("index.html", users=formatted_users)
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            # 1️⃣ 누적 출석 상위 10명 조회
+            cursor.execute("""
+                SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
+                FROM user_attendance_summary uas
+                JOIN users u ON u.user_id = uas.user_id
+                ORDER BY uas.total_count DESC, uas.last_attended DESC
+                LIMIT 10
+            """)
+            rows = cursor.fetchall()
+
+            users = []
+            for rank, row in enumerate(rows, start=1):
+                user_id, nickname, comment, total_count, last_attended = row
+
+                # 2️⃣ 도전과제 + 달성일 함께 조회
+                cursor.execute("""
+                    SELECT a.name, a.description, DATE(ua.achieved_at)
+                    FROM user_achievements ua
+                    JOIN achievements a ON ua.achievement_id = a.achievement_id
+                    WHERE ua.user_id = %s
+                """, (user_id,))
+                achievements = [
+                    {"name": a[0], "description": a[1], "achieved_at": a[2].strftime("%Y-%m-%d")}
+                    for a in cursor.fetchall()
+                ]
+
+                # 3️⃣ 프로필 이미지 처리
+                img_filename = f"{nickname}.png"
+                img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
+                if not os.path.exists(img_path):
+                    img_filename = "default.png"
+
+                # 4️⃣ 유저 딕셔너리 구성
+                users.append({
+                    "rank": rank,
+                    "nickname": nickname,
+                    "comment": comment,
+                    "total_count": total_count,
+                    "last_attended": last_attended,
+                    "img": f"/static/profiles/{img_filename}",
+                    "achievements": achievements
+                })
+
+            return render_template("index.html", users=users)
+    finally:
+        conn.close()
+
+
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', debug=False)
+    app.run(host='0.0.0.0', debug=True)

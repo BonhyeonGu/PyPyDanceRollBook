@@ -232,6 +232,7 @@ def award_over_immersed_achievement_from_date(start_date_str, config_path="confi
     finally:
         conn.close()
 
+#완장:         나없을때 저댄
 def award_captain_achievement_from_date(start_date_str, config_path="config.json"):
     """
     '완장' 도전과제 부여 함수.
@@ -309,8 +310,155 @@ def award_captain_achievement_from_date(start_date_str, config_path="config.json
     finally:
         conn.close()
 
+#최애숭배:      한 곡 30번
+def award_favorite_song_achievement(config_path="config.json"):
+    """
+    '최애숭배' 도전과제를 아직 받지 않은 유저를 대상으로,
+    같은 곡을 30일 이상 튼 기록이 있으면 달성 처리합니다.
+    """
+    # ✅ config.json 불러오기
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    db_conf = config["db"]
+    db_params = {
+        "host": db_conf["host"],
+        "port": db_conf["port"],
+        "user": db_conf["user"],
+        "password": db_conf["password"],
+        "db": db_conf["database"],
+        "charset": "utf8mb4"
+    }
+
+    conn = pymysql.connect(**db_params)
+    try:
+        with conn.cursor() as cursor:
+            # 1️⃣ '최애숭배' 도전과제 ID 조회
+            cursor.execute("""
+                SELECT achievement_id FROM achievements WHERE name = '최애숭배'
+            """)
+            result = cursor.fetchone()
+            if not result:
+                print("[ERROR] '최애숭배' 도전과제가 존재하지 않습니다.")
+                return
+            achievement_id = result[0]
+
+            # 2️⃣ 이미 달성한 유저 제외
+            cursor.execute("""
+                SELECT user_id FROM user_achievements
+                WHERE achievement_id = %s
+            """, (achievement_id,))
+            achieved_users = {row[0] for row in cursor.fetchall()}
+
+            # 3️⃣ 달성 안 한 유저 중 음악 기록 있는 유저만 추림
+            cursor.execute("""
+                SELECT DISTINCT user_id FROM music_play
+            """)
+            all_users = [row[0] for row in cursor.fetchall()]
+            target_users = [uid for uid in all_users if uid not in achieved_users]
+
+            # 4️⃣ 각 유저별 동일 곡의 "하루 1번만 카운트" 기록 확인
+            for uid in target_users:
+                cursor.execute("""
+                    SELECT title, COUNT(DISTINCT DATE(played_at)) as days, MAX(played_at)
+                    FROM music_play
+                    WHERE user_id = %s
+                    GROUP BY title
+                    HAVING days >= 30
+                    ORDER BY days DESC
+                    LIMIT 1
+                """, (uid,))
+                row = cursor.fetchone()
+                if row:
+                    title, days, last_played = row
+                    cursor.execute("""
+                        INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                        VALUES (%s, %s, %s)
+                    """, (uid, achievement_id, last_played.date()))
+                    conn.commit()
+                    print(f"[INFO] 유저 {uid} - '{title}'을 {days}일간 재생 → '최애숭배' 달성!")
+                else:
+                    print(f"[INFO] 유저 {uid}: 조건 미충족 (30일 이상 기록 없음).")
+
+    finally:
+        conn.close()
+
+def award_39_achievement(config_path="config.json"):
+    """
+    '39' 도전과제를 아직 받지 않은 유저를 대상으로,
+    서로 다른 곡을 39개 이상 플레이했으면 달성 처리합니다.
+    """
+    # ✅ config.json 불러오기
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    db_conf = config["db"]
+    db_params = {
+        "host": db_conf["host"],
+        "port": db_conf["port"],
+        "user": db_conf["user"],
+        "password": db_conf["password"],
+        "db": db_conf["database"],
+        "charset": "utf8mb4"
+    }
+
+    conn = pymysql.connect(**db_params)
+    try:
+        with conn.cursor() as cursor:
+            # 1️⃣ '39' 도전과제 ID 조회
+            cursor.execute("""
+                SELECT achievement_id FROM achievements WHERE name = '39'
+            """)
+            result = cursor.fetchone()
+            if not result:
+                print("[ERROR] '39' 도전과제가 존재하지 않습니다.")
+                return
+            achievement_id = result[0]
+
+            # 2️⃣ 이미 달성한 유저 제외
+            cursor.execute("""
+                SELECT user_id FROM user_achievements
+                WHERE achievement_id = %s
+            """, (achievement_id,))
+            achieved_users = {row[0] for row in cursor.fetchall()}
+
+            # 3️⃣ 달성 안 한 유저 중 음악 기록 있는 유저만 추림
+            cursor.execute("""
+                SELECT DISTINCT user_id FROM music_play
+            """)
+            all_users = [row[0] for row in cursor.fetchall()]
+            target_users = [uid for uid in all_users if uid not in achieved_users]
+
+            # 4️⃣ 각 유저별 서로 다른 곡 개수와 마지막 재생일 확인
+            for uid in target_users:
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT title) as distinct_count, MAX(played_at)
+                    FROM music_play
+                    WHERE user_id = %s
+                """, (uid,))
+                row = cursor.fetchone()
+                if row and row[0] >= 39:
+                    distinct_count, last_played = row
+                    cursor.execute("""
+                        INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                        VALUES (%s, %s, %s)
+                    """, (uid, achievement_id, last_played.date()))
+                    conn.commit()
+                    print(f"[INFO] 유저 {uid} - 서로 다른 곡 {distinct_count}개 플레이 → '39' 달성!")
+                else:
+                    print(f"[INFO] 유저 {uid}: 조건 미충족 (서로 다른 곡 {row[0]}개).")
+
+    finally:
+        conn.close()
+
 START_DAY = '2025-05-12'
+print("확인: 인싸")
 award_inssa_achievement_from_date(START_DAY, config_path="config.json")
+print("확인: 칠가이")
 award_chill_guy_achievement("config.json")
+print("확인: 과몰입")
 award_over_immersed_achievement_from_date(START_DAY, config_path="config.json")
+print("확인: 완장")
 award_captain_achievement_from_date(START_DAY, config_path="config.json")
+print("확인: 최애숭배")
+award_favorite_song_achievement("config.json")
+print("확인: 39")
+award_39_achievement("config.json")

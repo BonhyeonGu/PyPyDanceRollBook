@@ -181,7 +181,7 @@ def index():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            # 1️⃣ 누적 출석 상위 10명 조회
+            # 1️⃣ 누적 출석 상위 10명
             cursor.execute("""
                 SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
                 FROM user_attendance_summary uas
@@ -192,10 +192,12 @@ def index():
             rows = cursor.fetchall()
 
             users = []
+            ranking_user_ids = set()
             for rank, row in enumerate(rows, start=1):
                 user_id, nickname, comment, total_count, last_attended = row
+                ranking_user_ids.add(user_id)
 
-                # 2️⃣ 도전과제 + 달성일 함께 조회
+                # 도전과제
                 cursor.execute("""
                     SELECT a.name, a.description, DATE(ua.achieved_at)
                     FROM user_achievements ua
@@ -207,13 +209,12 @@ def index():
                     for a in cursor.fetchall()
                 ]
 
-                # 3️⃣ 프로필 이미지 처리
+                # 이미지
                 img_filename = f"{nickname}.png"
                 img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
                 if not os.path.exists(img_path):
                     img_filename = "default.png"
 
-                # 4️⃣ 유저 딕셔너리 구성
                 users.append({
                     "rank": rank,
                     "nickname": nickname,
@@ -224,10 +225,49 @@ def index():
                     "achievements": achievements
                 })
 
-            return render_template("index.html", users=users)
+            # 2️⃣ 랭킹에 없는 유저 4명 랜덤으로 뽑기
+            cursor.execute("""
+                SELECT u.user_id, u.nickname, u.comment
+                FROM users u
+                WHERE u.user_id NOT IN (%s)
+                ORDER BY RAND()
+                LIMIT 4
+            """ % (",".join(str(uid) for uid in ranking_user_ids)))
+            random_users = cursor.fetchall()
+
+            # 3️⃣ 랜덤 유저 데이터 구성
+            thanks_users = []
+            for row in random_users:
+                user_id, nickname, comment = row
+
+                # 도전과제
+                cursor.execute("""
+                    SELECT a.name, a.description, DATE(ua.achieved_at)
+                    FROM user_achievements ua
+                    JOIN achievements a ON ua.achievement_id = a.achievement_id
+                    WHERE ua.user_id = %s
+                """, (user_id,))
+                achievements = [
+                    {"name": a[0], "description": a[1], "achieved_at": a[2].strftime("%Y-%m-%d")}
+                    for a in cursor.fetchall()
+                ]
+
+                # 이미지
+                img_filename = f"{nickname}.png"
+                img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
+                if not os.path.exists(img_path):
+                    img_filename = "default.png"
+
+                thanks_users.append({
+                    "nickname": nickname,
+                    "comment": comment,
+                    "img": f"/static/profiles/{img_filename}",
+                    "achievements": achievements
+                })
+
+            return render_template("index.html", users=users, thanks_users=thanks_users)
     finally:
         conn.close()
-
 
 
 if __name__ == "__main__":

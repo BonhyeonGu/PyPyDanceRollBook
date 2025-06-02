@@ -227,20 +227,20 @@ def index():
 
             # 2️⃣ 랭킹에 없는 유저 4명 랜덤으로 뽑기
             cursor.execute("""
-                SELECT u.user_id, u.nickname, u.comment
+                SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
                 FROM users u
+                LEFT JOIN user_attendance_summary uas ON u.user_id = uas.user_id
                 WHERE u.user_id NOT IN (%s)
                 ORDER BY RAND()
                 LIMIT 4
             """ % (",".join(str(uid) for uid in ranking_user_ids)))
             random_users = cursor.fetchall()
 
-            # 3️⃣ 랜덤 유저 데이터 구성
             thanks_users = []
             for row in random_users:
-                user_id, nickname, comment = row
+                user_id, nickname, comment, total_count, last_attended = row
 
-                # 도전과제
+                # 도전과제 조회
                 cursor.execute("""
                     SELECT a.name, a.description, DATE(ua.achieved_at)
                     FROM user_achievements ua
@@ -252,7 +252,6 @@ def index():
                     for a in cursor.fetchall()
                 ]
 
-                # 이미지
                 img_filename = f"{nickname}.png"
                 img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
                 if not os.path.exists(img_path):
@@ -261,6 +260,8 @@ def index():
                 thanks_users.append({
                     "nickname": nickname,
                     "comment": comment,
+                    "total_count": total_count,
+                    "last_attended": last_attended,
                     "img": f"/static/profiles/{img_filename}",
                     "achievements": achievements
                 })

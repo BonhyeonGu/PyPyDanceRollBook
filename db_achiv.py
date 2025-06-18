@@ -315,6 +315,7 @@ def award_favorite_song_achievement(config_path="config.json"):
     """
     '최애숭배' 도전과제를 아직 받지 않은 유저를 대상으로,
     같은 곡을 30일 이상 튼 기록이 있으면 달성 처리합니다.
+    하루에 여러 번 틀어도 1번으로 계산합니다.
     """
     # ✅ config.json 불러오기
     with open(config_path, "r", encoding="utf-8") as f:
@@ -349,39 +350,53 @@ def award_favorite_song_achievement(config_path="config.json"):
             """, (achievement_id,))
             achieved_users = {row[0] for row in cursor.fetchall()}
 
-            # 3️⃣ 달성 안 한 유저 중 음악 기록 있는 유저만 추림
+            # 3️⃣ 음악 기록 있는 유저 중 달성 안 한 유저
             cursor.execute("""
                 SELECT DISTINCT user_id FROM music_play
             """)
             all_users = [row[0] for row in cursor.fetchall()]
             target_users = [uid for uid in all_users if uid not in achieved_users]
 
-            # 4️⃣ 각 유저별 동일 곡의 "하루 1번만 카운트" 기록 확인
+            # 4️⃣ 각 유저별로 동일 곡의 하루 1번 카운트 기준으로 30일 이상 재생한 곡 확인
             for uid in target_users:
                 cursor.execute("""
-                    SELECT title, COUNT(DISTINCT DATE(played_at)) as days, MAX(played_at)
+                    SELECT title, COUNT(DISTINCT DATE(played_at)) as days
                     FROM music_play
                     WHERE user_id = %s
                     GROUP BY title
-                    HAVING days >= 30
                     ORDER BY days DESC
                     LIMIT 1
                 """, (uid,))
                 row = cursor.fetchone()
-                if row:
-                    title, days, last_played = row
+
+                if row and row[1] >= 30:
+                    title, days = row
+
+                    # 가장 마지막에 튼 시점
+                    cursor.execute("""
+                        SELECT MAX(played_at) FROM music_play
+                        WHERE user_id = %s AND title = %s
+                    """, (uid, title))
+                    last_played = cursor.fetchone()[0]
+                    achieved_date = last_played.strftime('%Y-%m-%d %H:%M:%S')
+
                     cursor.execute("""
                         INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
                         VALUES (%s, %s, %s)
-                    """, (uid, achievement_id, last_played.date()))
+                    """, (uid, achievement_id, achieved_date))
                     conn.commit()
                     print(f"[INFO] 유저 {uid} - '{title}'을 {days}일간 재생 → '최애숭배' 달성!")
                 else:
-                    print(f"[INFO] 유저 {uid}: 조건 미충족 (30일 이상 기록 없음).")
+                    if row:
+                        title, max_days = row
+                        print(f"[INFO] 유저 {uid}: 조건 미충족 (가장 많이 튼 '{title}'은 {max_days}일 재생됨).")
+                    else:
+                        print(f"[INFO] 유저 {uid}: 음악 재생 기록은 있으나 곡별 일수 집계 실패.")
 
     finally:
         conn.close()
 
+#39:           39가지의 곡
 def award_39_achievement(config_path="config.json"):
     """
     '39' 도전과제를 아직 받지 않은 유저를 대상으로,

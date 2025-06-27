@@ -225,17 +225,19 @@ def index():
                     "achievements": achievements
                 })
 
-            # 2️⃣ 랭킹에 없는 유저 4명 랜덤으로 뽑기
-            cursor.execute("""
+            # 2️⃣ 랭킹에 없는 유저 6명 랜덤으로 뽑되, '아짱나'는 제외
+            placeholders = ",".join(str(uid) for uid in ranking_user_ids)
+            cursor.execute(f"""
                 SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
                 FROM users u
                 LEFT JOIN user_attendance_summary uas ON u.user_id = uas.user_id
-                WHERE u.user_id NOT IN (%s)
+                WHERE u.user_id NOT IN ({placeholders})
+                AND u.nickname != %s
                 ORDER BY RAND()
-                LIMIT 4
-            """ % (",".join(str(uid) for uid in ranking_user_ids)))
+                LIMIT 6
+            """, ("아짱나",))
             random_users = cursor.fetchall()
-
+            
             thanks_users = []
             for row in random_users:
                 user_id, nickname, comment, total_count, last_attended = row

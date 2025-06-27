@@ -2,6 +2,8 @@ import re
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
 import requests
+import json
+import os
 
 
 class PyPyDanceLogAnalyzer:
@@ -25,17 +27,46 @@ class PyPyDanceLogAnalyzer:
     def parse_time(self, line_or_ts: str):
         return datetime.strptime(line_or_ts[:19], "%Y.%m.%d %H:%M:%S")
 
-    def get_youtube_title(self, video_id: str):
+
+    def get_youtube_title(self, video_id: str, cache_path="youtube_title_cache.json"):
+        # 캐시 파일 불러오기
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    cache = json.load(f)
+            except Exception as e:
+                print(f"[WARN] 캐시 파일 읽기 실패: {e}")
+                cache = {}
+        else:
+            cache = {}
+
+        # 캐시에 있으면 반환
+        if video_id in cache:
+            return cache[video_id]
+
+        # API 키 없으면 ID 반환
         if not self.youtube_api_key:
             return video_id
+
+        # API 요청
         try:
             url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet&id={video_id}&key={self.youtube_api_key}"
             resp = requests.get(url)
             data = resp.json()
-            return data["items"][0]["snippet"]["title"] if data.get("items") else video_id
+            title = data["items"][0]["snippet"]["title"] if data.get("items") else video_id
         except Exception as e:
             print(f"[WARN] 유튜브 제목 조회 실패: {video_id}: {e}")
             return video_id
+
+        # 캐시에 저장하고 반환
+        cache[video_id] = title
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[WARN] 캐시 파일 저장 실패: {e}")
+
+        return title
 
     def extract_valid_ranges(self, lines):
         ranges = []

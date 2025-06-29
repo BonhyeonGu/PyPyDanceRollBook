@@ -98,17 +98,17 @@ def award_chill_guy_achievement(config_path="config.json"):
     conn = pymysql.connect(**db_params)
     try:
         with conn.cursor() as cursor:
-            # 1️⃣ 'Chill guy' 도전과제 ID 조회
+            # 1️⃣ 'ChillGuy' 도전과제 ID 조회
             cursor.execute("""
-                SELECT achievement_id FROM achievements WHERE name = 'Chill guy'
+                SELECT achievement_id FROM achievements WHERE name = 'ChillGuy'
             """)
             result = cursor.fetchone()
             if not result:
-                print("[ERROR] 'Chill guy' 도전과제가 존재하지 않습니다.")
+                print("[ERROR] 'ChillGuy' 도전과제가 존재하지 않습니다.")
                 return
             achievement_id = result[0]
 
-            # 2️⃣ 이미 'Chill guy' 달성한 유저 목록 조회
+            # 2️⃣ 이미 'ChillGuy' 달성한 유저 목록 조회
             cursor.execute("""
                 SELECT user_id FROM user_achievements
                 WHERE achievement_id = %s
@@ -151,7 +151,7 @@ def award_chill_guy_achievement(config_path="config.json"):
                             VALUES (%s, %s, %s)
                         """, (uid, achievement_id, start_date.strftime("%Y-%m-%d")))
                         conn.commit()
-                        print(f"[INFO] 유저 {uid} - 7일 연속 출석으로 'Chill guy' 달성!")
+                        print(f"[INFO] 유저 {uid} - 7일 연속 출석으로 'ChillGuy' 달성!")
                         break  # 이 유저는 조건 충족했으니 더 확인할 필요 없음
 
     finally:
@@ -464,6 +464,102 @@ def award_39_achievement(config_path="config.json"):
     finally:
         conn.close()
 
+#파인튜닝:    30일동안 평균 52분
+def award_finetuning_achievement(config_path="config.json"):
+    """
+    '파인튜닝' 도전과제를 아직 받지 않은 유저를 대상으로,
+    과거 어떤 날짜 기준 30일간의 평균 플레이 시간이 55분 이상이면 달성 처리합니다.
+    """
+
+    # ✅ config.json 불러오기
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    db_conf = config["db"]
+    db_params = {
+        "host": db_conf["host"],
+        "port": db_conf["port"],
+        "user": db_conf["user"],
+        "password": db_conf["password"],
+        "db": db_conf["database"],
+        "charset": "utf8mb4"
+    }
+
+    conn = pymysql.connect(**db_params)
+    try:
+        with conn.cursor() as cursor:
+            # 1️⃣ '파인튜닝' 도전과제 ID 조회
+            cursor.execute("""
+                SELECT achievement_id FROM achievements WHERE name = '파인튜닝'
+            """)
+            result = cursor.fetchone()
+            if not result:
+                print("[ERROR] '파인튜닝' 도전과제가 존재하지 않습니다.")
+                return
+            achievement_id = result[0]
+
+            # 2️⃣ 이미 달성한 유저 제외
+            cursor.execute("""
+                SELECT user_id FROM user_achievements
+                WHERE achievement_id = %s
+            """, (achievement_id,))
+            achieved_users = {row[0] for row in cursor.fetchall()}
+
+            # 3️⃣ 출석 기록이 있는 유저 조회
+            cursor.execute("SELECT DISTINCT user_id FROM attendance")
+            all_users = [row[0] for row in cursor.fetchall()]
+            target_users = [uid for uid in all_users if uid not in achieved_users]
+
+            for uid in target_users:
+                # 이 유저의 출석 날짜 범위 확인
+                cursor.execute("""
+                    SELECT DISTINCT DATE(enter_time) as day
+                    FROM attendance
+                    WHERE user_id = %s
+                    ORDER BY day
+                """, (uid,))
+                date_rows = [row[0] for row in cursor.fetchall()]
+                if len(date_rows) < 30:
+                    continue  # 출석일 자체가 30일 미만이면 의미 없음
+
+                # 슬라이딩 윈도우로 30일 단위로 확인
+                for start_idx in range(len(date_rows)):
+                    start_day = date_rows[start_idx]
+                    end_day = start_day + timedelta(days=29)
+
+                    # 30일 범위 내 실제 출석일 수
+                    cursor.execute("""
+                        SELECT DISTINCT DATE(enter_time)
+                        FROM attendance
+                        WHERE user_id = %s AND DATE(enter_time) BETWEEN %s AND %s
+                    """, (uid, start_day, end_day))
+                    attendance_days = [row[0] for row in cursor.fetchall()]
+                    attendance_count = len(attendance_days)
+
+                    if attendance_count < 30:
+                        continue
+
+                    # 해당 범위 내 총 플레이 시간
+                    cursor.execute("""
+                        SELECT SUM(TIMESTAMPDIFF(SECOND, enter_time, leave_time))
+                        FROM attendance
+                        WHERE user_id = %s AND DATE(enter_time) BETWEEN %s AND %s
+                    """, (uid, start_day, end_day))
+                    total_seconds = cursor.fetchone()[0] or 0
+                    avg_minutes = (total_seconds / 60) / attendance_count
+
+                    if avg_minutes >= 52:
+                        cursor.execute("""
+                            INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                            VALUES (%s, %s, %s)
+                        """, (uid, achievement_id, end_day.strftime("%Y-%m-%d")))
+                        conn.commit()
+                        print(f"[INFO] 유저 {uid} - 평균 {avg_minutes:.2f}분 → '파인튜닝' 달성!")
+                        break  # 한 번이라도 만족하면 중단
+
+    finally:
+        conn.close()
+
+
 START_DAY = '2025-05-12'
 print("확인: 인싸")
 award_inssa_achievement_from_date(START_DAY, config_path="config.json")
@@ -477,3 +573,5 @@ print("확인: 최애숭배")
 award_favorite_song_achievement("config.json")
 print("확인: 39")
 award_39_achievement("config.json")
+print("확인: 파인튜닝")
+award_finetuning_achievement("config.json")

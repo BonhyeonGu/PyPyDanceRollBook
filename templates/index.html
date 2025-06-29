@@ -39,7 +39,8 @@
     <!-- 랭킹 리스트 -->
     <div class="space-y-4 mt-8">
       {% for user in users %}
-      <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center space-x-6 hover:shadow-lg transition-colors duration-300">
+      <div class="user-box bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center space-x-6 hover:shadow-lg transition-colors duration-300"
+          data-nickname="{{ user.nickname }}">
         <div class="text-2xl font-bold w-8 text-gray-500 dark:text-gray-300 text-center">#{{ user.rank }}</div>
 
         <img src="{{ user.img }}" alt="{{ user.nickname }} 프로필"
@@ -83,46 +84,43 @@
       {% endfor %}
     </div>
 
-    
-    <!-- Thanks~ 섹션 -->
+    <!-- 히든 스타 섹션 -->
     <div class="mt-16">
       <h2 class="text-xl font-bold mb-4">히든 스타</h2>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {% for user in thanks_users %}
-          <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center justify-between space-x-4 hover:shadow-lg transition-colors duration-300">
-            <!-- 프로필 이미지 -->
-            <img src="{{ user.img }}" alt="{{ user.nickname }} 프로필"
-                class="w-16 h-16 rounded-full object-cover border border-gray-300 dark:border-gray-600 shadow-sm">
+        {% for user in thanks_users %}
+        <div class="user-box bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center justify-between space-x-4 hover:shadow-lg transition-colors duration-300"
+            data-nickname="{{ user.nickname }}">
 
-            <!-- 유저 정보 -->
-            <div class="flex-1">
-              <div class="text-lg font-semibold text-gray-800 dark:text-white">{{ user.nickname }}</div>
-              <div class="text-gray-500 dark:text-gray-300 text-sm">{{ user.comment or '한줄 소개 없음' }}</div>
-              <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">누적 출석: {{ user.total_count or 0 }}회</div>
-              <div class="text-xs text-gray-600 dark:text-gray-300">마지막 접속: {{ user.last_attended.strftime('%Y-%m-%d %H:%M') if user.last_attended else '기록 없음' }}</div>
-            </div>
+          <img src="{{ user.img }}" alt="{{ user.nickname }} 프로필"
+              class="w-16 h-16 rounded-full object-cover border border-gray-300 dark:border-gray-600 shadow-sm">
 
-            <!-- 도전과제 아이콘들 -->
-            <div class="flex flex-wrap gap-2 ml-4">
-              {% for ach in user.achievements %}
-              <div class="relative group">
-                <img src="/static/achievements/a_{{ ach.name }}.png"
-                    alt="{{ ach.name }} 아이콘"
-                    class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-pointer">
-                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2
-                            bg-black/90 text-white text-xs px-3 py-1 rounded shadow-lg
-                            opacity-0 group-hover:opacity-100 transition-opacity duration-200
-                            pointer-events-none z-50 whitespace-nowrap text-center">
-                  <div class="font-bold">{{ ach.name }} ({{ ach.achieved_at }})</div>
-                  <div class="text-[10px] mt-1">{{ ach.description }}</div>
-                </div>
-              </div>
-              {% endfor %}
-            </div>
+          <div class="flex-1">
+            <div class="text-lg font-semibold text-gray-800 dark:text-white">{{ user.nickname }}</div>
+            <div class="text-gray-500 dark:text-gray-300 text-sm">{{ user.comment or '한줄 소개 없음' }}</div>
+            <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">누적 출석: {{ user.total_count or 0 }}회</div>
+            <div class="text-xs text-gray-600 dark:text-gray-300">마지막 접속: {{ user.last_attended.strftime('%Y-%m-%d %H:%M') if user.last_attended else '기록 없음' }}</div>
           </div>
-          {% endfor %}
+
+          <!-- 도전과제 아이콘들 -->
+          <div class="flex flex-wrap gap-2 ml-4">
+            {% for ach in user.achievements %}
+            <div class="relative group">
+              <img src="/static/achievements/a_{{ ach.name }}.png"
+                  alt="{{ ach.name }} 아이콘"
+                  class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-pointer">
+              <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 bg-black/90 text-white text-xs px-3 py-1 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 whitespace-nowrap text-center">
+                <div class="font-bold">{{ ach.name }} ({{ ach.achieved_at }})</div>
+                <div class="text-[10px] mt-1">{{ ach.description }}</div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+
         </div>
+        {% endfor %}
       </div>
+    </div>
 
     <!-- 인기곡 10선 -->
     <div class="mt-16">
@@ -191,6 +189,29 @@
       applyThemeUI(isDark);
     });
 
+
+    function bindUserBoxEvents() {
+      document.querySelectorAll(".user-box").forEach(box => {
+        // 먼저 기존 이벤트 완전히 제거
+        const cloned = box.cloneNode(true);
+        box.replaceWith(cloned);
+      });
+
+      document.querySelectorAll(".user-box").forEach(box => {
+        box.addEventListener("click", () => {
+          const nickname = box.dataset.nickname;
+          const input = document.getElementById("searchInput");
+
+          input.value = nickname;
+          searchUser();
+
+          const targetY = input.getBoundingClientRect().top + window.scrollY - 100;
+          smoothScrollTo(targetY);
+        });
+      });
+    }
+
+    
     // 날짜별 참여자 + 음악 조회
     document.getElementById("calendar").addEventListener("change", async (e) => {
       const date = e.target.value;
@@ -210,10 +231,13 @@
         participants.forEach((p, i) => {
           const el = document.createElement("div");
           el.className = `
+            user-box
             bg-white dark:bg-gray-800 text-gray-800 dark:text-white
             rounded-xl shadow p-4 flex items-center space-x-4
             transition-colors duration-300 min-h-[110px]
           `.trim();
+
+          el.dataset.nickname = p.nickname;
 
           const img = document.createElement("img");
           img.src = p.img;
@@ -235,6 +259,7 @@
           `;
           pList.appendChild(el);
         });
+        bindUserBoxEvents();
       }
 
       if (musics.length === 0) {
@@ -403,6 +428,39 @@
       }
     }
 
+    function smoothScrollTo(targetY, duration = 400) {
+      const startY = window.scrollY;
+      const startTime = performance.now();
+
+      function step(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const ease = 0.5 * (1 - Math.cos(Math.PI * progress)); // easeInOut
+        window.scrollTo(0, startY + (targetY - startY) * ease);
+
+        if (progress < 1) requestAnimationFrame(step);
+      }
+
+      requestAnimationFrame(step);
+    }
+
+
+    document.querySelectorAll(".user-box").forEach(box => {
+      box.addEventListener("click", () => {
+        const nickname = box.dataset.nickname;
+        const input = document.getElementById("searchInput");
+
+        // 검색어 입력
+        input.value = nickname;
+
+        // 검색 실행
+        searchUser();
+
+        // 스크롤 이동 (부드럽게)
+        const targetY = input.getBoundingClientRect().top + window.scrollY - 100;
+        smoothScrollTo(targetY);
+      });
+    });
 
     
   </script>

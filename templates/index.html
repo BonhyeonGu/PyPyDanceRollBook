@@ -328,7 +328,7 @@
           // 이름 복사 이벤트
           el.querySelector(".copy-title").addEventListener("click", (e) => {
             e.stopPropagation();
-            navigator.clipboard.writeText(m.title).then(() => showToast("이름이 복사되었습니다."));
+            navigator.clipboard.writeText(m.title).then(() => showToast("제목이 복사되었습니다."));
           });
 
           // URL 복사 이벤트

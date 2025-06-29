@@ -157,6 +157,7 @@ def user_profile():
                 FROM user_achievements ua
                 JOIN achievements a ON ua.achievement_id = a.achievement_id
                 WHERE ua.user_id = %s
+                ORDER BY ua.achieved_at DESC
             """, (user_id,))
             achievements = [
                 {"name": row[0], "description": row[1], "achieved_at": row[2].strftime("%Y-%m-%d")}
@@ -213,6 +214,7 @@ def index():
                     FROM user_achievements ua
                     JOIN achievements a ON ua.achievement_id = a.achievement_id
                     WHERE ua.user_id = %s
+                    ORDER BY ua.achieved_at DESC
                 """, (user_id,))
                 achievements = [
                     {"name": a[0], "description": a[1], "achieved_at": a[2].strftime("%Y-%m-%d")}
@@ -265,6 +267,7 @@ def index():
                     FROM user_achievements ua
                     JOIN achievements a ON ua.achievement_id = a.achievement_id
                     WHERE ua.user_id = %s
+                    ORDER BY ua.achieved_at DESC
                 """, (user_id,))
                 achievements = [
                     {"name": a[0], "description": a[1], "achieved_at": a[2].strftime("%Y-%m-%d")}

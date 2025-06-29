@@ -237,15 +237,22 @@ def index():
 
             # 2️⃣ 랭킹에 없는 유저 6명 랜덤으로 뽑되, '아짱나'는 제외
             placeholders = ",".join(str(uid) for uid in ranking_user_ids)
+            # 제외할 닉네임들
+            excluded_nicknames = ("아짱나", "미쿠")
+
+            # %s 플레이스홀더 여러 개 생성
+            nickname_placeholders = ",".join(["%s"] * len(excluded_nicknames))
+
+            # SQL 쿼리 수정
             cursor.execute(f"""
                 SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
                 FROM users u
                 LEFT JOIN user_attendance_summary uas ON u.user_id = uas.user_id
                 WHERE u.user_id NOT IN ({placeholders})
-                AND u.nickname != %s
+                AND u.nickname NOT IN ({nickname_placeholders})
                 ORDER BY RAND()
                 LIMIT 6
-            """, ("아짱나","미쿠",))
+            """, excluded_nicknames)
             random_users = cursor.fetchall()
             
             thanks_users = []

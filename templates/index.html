@@ -235,6 +235,19 @@
     }
 
     
+    function showToast(message) {
+      const toast = document.getElementById("copyToast");
+      toast.textContent = message;
+      toast.classList.remove("hide");
+      toast.classList.add("show");
+
+      setTimeout(() => {
+        toast.classList.remove("show");
+        toast.classList.add("hide");
+      }, 1500);
+    }
+
+
     // 날짜별 참여자 + 음악 조회
     document.getElementById("calendar").addEventListener("change", async (e) => {
       const date = e.target.value;
@@ -306,15 +319,22 @@
             <div class="text-sm text-gray-500 dark:text-gray-300">${m.played_at}</div>
             <div class="font-semibold text-sm mt-1">${m.title}</div>
             <div class="text-sm text-gray-600 dark:text-gray-400">by ${m.user}</div>
-            <button class="absolute top-2 right-2 text-xs text-blue-500 hover:underline copy-btn">
-              URL 복사
-            </button>
+            <div class="absolute top-2 right-2 flex gap-5">
+              <button class="text-xs text-blue-500 hover:underline copy-title">이름 복사</button>
+              <button class="text-xs text-blue-500 hover:underline copy-url">URL 복사</button>
+            </div>
           `;
 
-          // 복사 버튼 이벤트 (토스트 없음)
-          el.querySelector(".copy-btn").addEventListener("click", (e) => {
-            e.stopPropagation(); // 카드 클릭 방지
-            navigator.clipboard.writeText(m.url);
+          // 이름 복사 이벤트
+          el.querySelector(".copy-title").addEventListener("click", (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(m.title).then(() => showToast("이름이 복사되었습니다."));
+          });
+
+          // URL 복사 이벤트
+          el.querySelector(".copy-url").addEventListener("click", (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(m.url).then(() => showToast("URL이 복사되었습니다."));
           });
 
           mList.appendChild(el);
@@ -357,14 +377,7 @@
         // 클릭 시 클립보드 복사 + 토스트
         card.addEventListener("click", () => {
           navigator.clipboard.writeText(m.title).then(() => {
-            const toast = document.getElementById("copyToast");
-            toast.classList.remove("hide");
-            toast.classList.add("show");
-
-            setTimeout(() => {
-              toast.classList.remove("show");
-              toast.classList.add("hide");
-            }, 1500);
+            showToast("제목이 복사되었습니다.");
           });
         });
 

@@ -164,8 +164,10 @@ class PyPyDanceLogAnalyzer:
                     "type": "music",
                     "timestamp": ts,
                     "title": title,
-                    "user": user
+                    "user": user,
+                    "url": url  # 추가
                 }
+
 
     def analyze(self):
         with open(self.log_file_path, "r", encoding="utf-8") as f:

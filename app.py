@@ -84,7 +84,7 @@ def music_by_date():
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT m.played_at, m.title, u.nickname
+                SELECT m.played_at, m.title, m.url, u.nickname
                 FROM music_play m
                 JOIN users u ON m.user_id = u.user_id
                 WHERE DATE(m.played_at) = %s
@@ -95,7 +95,8 @@ def music_by_date():
                 {
                     "played_at": r[0].strftime("%H:%M"),
                     "title": r[1],
-                    "user": r[2]
+                    "url": r[2],
+                    "user": r[3]
                 } for r in rows
             ])
     finally:

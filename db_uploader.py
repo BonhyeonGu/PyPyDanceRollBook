@@ -115,9 +115,9 @@ def insert_results_to_db(db_conf, attendance_list, music_list):
                 if result:
                     user_id = result[0]
                     cursor.execute("""
-                        INSERT INTO music_play (user_id, played_at, title)
-                        VALUES (%s, %s, %s)
-                    """, (user_id, m["timestamp"], m["title"]))
+                        INSERT INTO music_play (user_id, played_at, title, url)
+                        VALUES (%s, %s, %s, %s)
+                    """, (user_id, m["timestamp"], m["title"], m["url"]))
 
         conn.commit()
     finally:

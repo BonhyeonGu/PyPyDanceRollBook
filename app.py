@@ -163,6 +163,14 @@ def user_profile():
                 for row in cursor.fetchall()
             ]
 
+            cursor.execute("""
+                SELECT
+                    (SELECT COALESCE(SUM(duration_sec), 0) FROM attendance WHERE user_id = %s),
+                    (SELECT COUNT(*) FROM music_play WHERE user_id = %s)
+            """, (user_id, user_id))
+            play_duration_sec, song_play_count = cursor.fetchone()
+            
+
             # 3️⃣ 응답 JSON
             return jsonify({
                 "nickname": nickname,
@@ -170,7 +178,9 @@ def user_profile():
                 "total_count": result[3],
                 "last_attended": result[4].strftime("%Y-%m-%d %H:%M") if result[4] else None,
                 "img": f"/static/profiles/{img_filename}",
-                "achievements": achievements
+                "achievements": achievements,
+                "play_duration_sec": play_duration_sec,
+                "song_play_count": song_play_count
             })
 
     finally:

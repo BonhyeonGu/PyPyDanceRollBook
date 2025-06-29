@@ -402,15 +402,27 @@
         // 중앙: 프로필 사진 + 유저 정보
         const infoDiv = document.createElement("div");
         infoDiv.className = "flex flex-col items-center text-center sm:px-4";
+        
+        const totalSec = p.play_duration_sec || 0;
+        const hours = Math.floor(totalSec / 3600);
+        const minutes = Math.floor((totalSec % 3600) / 60);
+        const formattedPlayTime = `${hours}시간 ${minutes}분`;
+
         infoDiv.innerHTML = `
           <img src="${p.img}" onerror="this.src='/static/profiles/default.png'" 
               alt="${p.nickname} 프로필"
               class="w-52 h-52 rounded-full object-cover border-4 border-gray-300 dark:border-gray-600 mb-4" />
           <h3 class="text-2xl font-bold mb-2">${p.nickname}</h3>
           <p class="text-gray-500 italic mb-2">${p.comment || "한줄 소개 없음"}</p>
-          <div class="text-lg text-gray-800 dark:text-gray-200">
-            <p><strong>누적 출석:</strong> ${p.total_count}회</p>
-            <p><strong>최근 접속:</strong> ${p.last_attended || "기록 없음"}</p>
+          <div class="flex justify-between gap-6 text-gray-800 dark:text-gray-200 text-base sm:text-lg w-full px-6 max-w-2xl translate-x-8">
+            <div class="flex flex-col gap-1 text-left sm:min-w-[8rem]">
+              <p><strong>누적 출석:</strong> ${p.total_count}회</p>
+              <p><strong>총 플레이:</strong> ${formattedPlayTime}</p>
+            </div>
+            <div class="flex flex-col gap-1 text-left sm:min-w-[8rem]">
+              <p><strong>최근 접속:</strong> ${p.last_attended || "기록 없음"}</p>
+              <p><strong>곡 선택:</strong> ${p.song_play_count}회</p>
+            </div>
           </div>
         `;
 

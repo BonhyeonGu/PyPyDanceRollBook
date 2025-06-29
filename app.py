@@ -245,7 +245,7 @@ def index():
                 AND u.nickname != %s
                 ORDER BY RAND()
                 LIMIT 6
-            """, ("아짱나",))
+            """, ("아짱나","미쿠",))
             random_users = cursor.fetchall()
             
             thanks_users = []

@@ -172,8 +172,21 @@ def user_profile():
             """, (user_id, user_id))
             play_duration_sec, song_play_count = cursor.fetchone()
             
+            # 3️⃣ 최근 30일 참여 시간 (일별)
+            cursor.execute("""
+                SELECT DATE(enter_time) AS day, SUM(duration_sec)
+                FROM attendance
+                WHERE user_id = %s AND enter_time >= CURDATE() - INTERVAL 30 DAY
+                GROUP BY day
+                ORDER BY day ASC
+            """, (user_id,))
+            recent_30days = [
+                {"date": row[0].strftime("%Y-%m-%d"), "duration_sec": row[1]}
+                for row in cursor.fetchall()
+            ]
 
-            # 3️⃣ 응답 JSON
+
+            # 4️⃣ 응답 JSON
             return jsonify({
                 "nickname": nickname,
                 "comment": result[2],
@@ -182,7 +195,8 @@ def user_profile():
                 "img": f"/static/profiles/{img_filename}",
                 "achievements": achievements,
                 "play_duration_sec": play_duration_sec,
-                "song_play_count": song_play_count
+                "song_play_count": song_play_count,
+                "recent_30days": recent_30days  # ✅ 추가됨
             })
 
     finally:

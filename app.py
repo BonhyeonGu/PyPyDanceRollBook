@@ -2,6 +2,7 @@ from flask import Flask, render_template, jsonify, request
 import pymysql
 import os
 import json
+from datetime import date, timedelta
 
 app = Flask(__name__)
 
@@ -180,10 +181,21 @@ def user_profile():
                 GROUP BY day
                 ORDER BY day ASC
             """, (user_id,))
-            recent_30days = [
-                {"date": row[0].strftime("%Y-%m-%d"), "duration_sec": row[1]}
-                for row in cursor.fetchall()
-            ]
+            raw = cursor.fetchall()
+
+            # 👉 결과를 dict로 변환
+            activity_map = {row[0]: row[1] for row in raw}
+
+            # 👉 최근 30일 날짜 생성
+            today = date.today()
+            recent_30days = []
+            for i in range(30):
+                day = today - timedelta(days=29 - i)
+                sec = activity_map.get(day, 0)
+                recent_30days.append({
+                    "date": day.strftime("%Y-%m-%d"),
+                    "duration_sec": sec
+                })
 
 
             # 4️⃣ 응답 JSON

@@ -264,36 +264,30 @@
       if (participants.length === 0) {
         pList.innerHTML = "<div class='text-sm text-gray-500 dark:text-gray-400'>참여자가 없습니다.</div>";
       } else {
-        participants.forEach((p, i) => {
+        participants.forEach((p) => {
           const el = document.createElement("div");
           el.className = `
             user-box
             bg-white dark:bg-gray-800 text-gray-800 dark:text-white
-            rounded-xl shadow p-4 flex items-center space-x-4
-            transition-colors duration-300 min-h-[110px]
+            rounded-xl shadow flex items-stretch gap-4
+            transition-colors duration-300 min-h-[110px] pl-0 pr-4
           `.trim();
 
           el.dataset.nickname = p.nickname;
 
-          const img = document.createElement("img");
-          img.src = p.img;
-          img.onerror = () => { img.src = PROFILE_BASE + "/default.png"; };
-          img.alt = `${p.nickname} 프로필`;
-          img.className = "w-12 h-20 object-cover object-left rounded border border-gray-300 dark:border-gray-600";
-
-
           el.innerHTML = `
-            <div class="text-lg font-bold w-6 text-gray-600 dark:text-gray-300">#${i + 1}</div>
-            <div class="w-10 h-16 overflow-hidden rounded">
+            <div class="h-[110px] w-[64px] overflow-hidden shrink-0 rounded-l-xl">
               <img src="${p.img}" alt="${p.nickname} 프로필"
-                  class="w-full h-full object-cover object-left border border-gray-300 dark:border-gray-600"
+                  class="w-[84px] h-full object-cover object-[40%] border border-gray-300 dark:border-gray-600"
                   onerror="this.src='${PROFILE_BASE}/default.png'">
             </div>
-            <div class="flex-1">
+
+            <div class="flex-1 flex flex-col justify-center">
               <div class="font-semibold">${p.nickname}</div>
               <div class="text-sm text-gray-500 dark:text-gray-300">${p.comment || '한줄 소개 없음'}</div>
             </div>
-            <div class="text-sm text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">
+
+            <div class="text-sm text-gray-700 dark:text-gray-300 text-right whitespace-nowrap self-center">
               누적 ${p.total_count}회<br>
               체류 ${p.duration}분
             </div>
@@ -301,6 +295,13 @@
 
           pList.appendChild(el);
         });
+
+
+
+
+
+
+
         bindUserBoxEvents();
       }
 

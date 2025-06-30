@@ -464,14 +464,17 @@ def award_39_achievement(config_path="config.json"):
     finally:
         conn.close()
 
-#파인튜닝:    30일동안 평균 50분
-def award_finetuning_achievement(config_path="config.json"):
+#파인튜닝:    30일동안 평균 55분
+def award_finetuning_achievement(config_path="config.json", verbose: bool = True):
     """
-    '파인튜닝' 도전과제를 아직 받지 않은 유저를 대상으로,
-    과거 어떤 날짜 기준 30일간의 평균 플레이 시간이 55분 이상이면 달성 처리합니다.
+    유저의 각 출석일 기준, 해당 날짜 포함 이전 출석일 최대 30개에 대해
+    평균 플레이 시간이 55분 이상이면 도전과제 '파인튜닝'을 달성합니다.
+
+    ✅ 도전과제 등록 시 해당 유저는 더 이상 평가하지 않음
+    ✅ 모든 평가 구간은 verbose=True일 때만 로그 출력
+    ✅ 각 날짜의 참여 시간도 함께 로그에 출력
     """
 
-    # ✅ config.json 불러오기
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
     db_conf = config["db"]
@@ -487,7 +490,7 @@ def award_finetuning_achievement(config_path="config.json"):
     conn = pymysql.connect(**db_params)
     try:
         with conn.cursor() as cursor:
-            # 1️⃣ '파인튜닝' 도전과제 ID 조회
+            # 1️⃣ 도전과제 ID 조회
             cursor.execute("""
                 SELECT achievement_id FROM achievements WHERE name = '파인튜닝'
             """)
@@ -504,60 +507,80 @@ def award_finetuning_achievement(config_path="config.json"):
             """, (achievement_id,))
             achieved_users = {row[0] for row in cursor.fetchall()}
 
-            # 3️⃣ 출석 기록이 있는 유저 조회
+            # 3️⃣ 출석 기록 있는 유저 조회
             cursor.execute("SELECT DISTINCT user_id FROM attendance")
             all_users = [row[0] for row in cursor.fetchall()]
             target_users = [uid for uid in all_users if uid not in achieved_users]
 
             for uid in target_users:
-                # 이 유저의 출석 날짜 범위 확인
+                # 출석일 목록 (오름차순)
                 cursor.execute("""
                     SELECT DISTINCT DATE(enter_time) as day
                     FROM attendance
                     WHERE user_id = %s
                     ORDER BY day
                 """, (uid,))
-                date_rows = [row[0] for row in cursor.fetchall()]
-                if len(date_rows) < 30:
-                    continue  # 출석일 자체가 30일 미만이면 의미 없음
+                attendance_days = [row[0] for row in cursor.fetchall()]
+                total_attendances = len(attendance_days)
 
-                # 슬라이딩 윈도우로 30일 단위로 확인
-                for start_idx in range(len(date_rows)):
-                    start_day = date_rows[start_idx]
-                    end_day = start_day + timedelta(days=29)
+                if total_attendances == 0:
+                    if verbose:
+                        print(f"[유저 {uid}] ▶ 출석일 없음 → 평가 불가\n")
+                    continue
 
-                    # 30일 범위 내 실제 출석일 수
+                for idx in range(total_attendances):
+                    current_day = attendance_days[idx]
+                    window_days = attendance_days[max(0, idx - 29):idx + 1]
+                    start_day = window_days[0]
+                    end_day = window_days[-1]
+
+                    # 전체 총 시간 계산
                     cursor.execute("""
-                        SELECT DISTINCT DATE(enter_time)
-                        FROM attendance
-                        WHERE user_id = %s AND DATE(enter_time) BETWEEN %s AND %s
-                    """, (uid, start_day, end_day))
-                    attendance_days = [row[0] for row in cursor.fetchall()]
-                    attendance_count = len(attendance_days)
-
-                    if attendance_count < 30:
-                        continue
-
-                    # 해당 범위 내 총 플레이 시간
-                    cursor.execute("""
-                        SELECT SUM(TIMESTAMPDIFF(SECOND, enter_time, leave_time))
+                        SELECT SUM(duration_sec)
                         FROM attendance
                         WHERE user_id = %s AND DATE(enter_time) BETWEEN %s AND %s
                     """, (uid, start_day, end_day))
                     total_seconds = cursor.fetchone()[0] or 0
-                    avg_minutes = (total_seconds / 60) / attendance_count
+                    avg_minutes = (total_seconds / 60) / len(window_days)
 
-                    if avg_minutes >= 50:
+                    # 각 날짜별 duration도 조회
+                    cursor.execute("""
+                        SELECT DATE(enter_time), SUM(duration_sec)
+                        FROM attendance
+                        WHERE user_id = %s AND DATE(enter_time) BETWEEN %s AND %s
+                        GROUP BY DATE(enter_time)
+                    """, (uid, start_day, end_day))
+                    per_day_durations = {row[0]: row[1] for row in cursor.fetchall()}
+
+                    # 로그
+                    if verbose:
+                        day_str_list = []
+                        for d in window_days:
+                            mins = (per_day_durations.get(d, 0)) / 60
+                            day_str_list.append(f"{d.strftime('%m-%d')} ({mins:.1f}분)")
+
+                        status = "✅" if len(window_days) == 30 and avg_minutes >= 55 else "❌"
+                        print(f"[유저 {uid}] ▶ 기준일: {current_day.strftime('%m-%d')} | 출석일 수: {len(window_days)} | 평균: {avg_minutes:.2f}분 {status}")
+                        print(f"       ↳ 날짜들: [{', '.join(day_str_list)}]")
+
+                    # 조건 만족 시 등록 후 유저 평가 종료
+                    if len(window_days) == 30 and avg_minutes >= 55:
                         cursor.execute("""
                             INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
                             VALUES (%s, %s, %s)
-                        """, (uid, achievement_id, end_day.strftime("%Y-%m-%d")))
+                        """, (uid, achievement_id, current_day.strftime("%Y-%m-%d")))
                         conn.commit()
-                        print(f"[INFO] 유저 {uid} - 평균 {avg_minutes:.2f}분 → '파인튜닝' 달성!")
-                        break  # 한 번이라도 만족하면 중단
+                        if verbose:
+                            print(f"[유저 {uid}] ▶ 도전과제 '파인튜닝' 달성 후 평가 종료\n")
+                        break  # 유저에 대해 추가 평가 중단
+
+                if verbose:
+                    print()  # 유저 구분용 개행
 
     finally:
         conn.close()
+
+
 
 
 START_DAY = '2025-05-12'

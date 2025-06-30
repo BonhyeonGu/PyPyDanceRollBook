@@ -464,7 +464,7 @@ def award_39_achievement(config_path="config.json"):
     finally:
         conn.close()
 
-#파인튜닝:    30일동안 평균 52분
+#파인튜닝:    30일동안 평균 50분
 def award_finetuning_achievement(config_path="config.json"):
     """
     '파인튜닝' 도전과제를 아직 받지 않은 유저를 대상으로,
@@ -547,7 +547,7 @@ def award_finetuning_achievement(config_path="config.json"):
                     total_seconds = cursor.fetchone()[0] or 0
                     avg_minutes = (total_seconds / 60) / attendance_count
 
-                    if avg_minutes >= 52:
+                    if avg_minutes >= 50:
                         cursor.execute("""
                             INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
                             VALUES (%s, %s, %s)

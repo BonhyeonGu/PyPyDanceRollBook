@@ -19,7 +19,7 @@ class PyPyDanceLogAnalyzer:
         self.enter_room_pattern = re.compile(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2} .*?Entering Room: " + re.escape(self.room_name))
         self.leave_room_pattern = re.compile(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2} .*?(Successfully left room|Safe handle has been closed)")
         self.join_pattern = re.compile(r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}) .*?OnPlayerJoinComplete (.+)")
-        self.left_pattern = re.compile(r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}) .*?OnPlayerLeft (.+)")
+        self.left_pattern = re.compile(r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}) .*?OnPlayerLeft ([^(]+)")
         self.video_play_pattern = re.compile(
             r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}) .*?\[VRCX\] VideoPlay\(" + re.escape(self.room_name) + r"\) \"([^\"]+)\",.*?,\"([^\"]+)\""
         )
@@ -90,14 +90,14 @@ class PyPyDanceLogAnalyzer:
             jm = self.join_pattern.search(line)
             if jm:
                 ts = self.parse_time(jm.group(1))
-                name = jm.group(2)
+                name = jm.group(2).strip() 
                 if name not in join_times:
                     join_times[name] = ts
 
             lm = self.left_pattern.search(line)
             if lm:
                 ts = self.parse_time(lm.group(1))
-                name = lm.group(2)
+                name = lm.group(2).strip() 
                 left_times[name] = ts
 
         for name, join_time in join_times.items():

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_from_directory
 import pymysql
 import os
 import json
@@ -28,7 +28,7 @@ def get_top_attendees(limit=10):
     finally:
         conn.close()
 
-@app.route("/participants")
+@app.route("/api/date/participants")
 def participants_by_date():
     date_str = request.args.get("date")  # YYYY-MM-DD
     if not date_str:
@@ -75,7 +75,7 @@ def participants_by_date():
 
     return jsonify(users)
 
-@app.route("/music")
+@app.route("/api/date/music")
 def music_by_date():
     date_str = request.args.get("date")
     if not date_str:
@@ -103,7 +103,7 @@ def music_by_date():
     finally:
         conn.close()
 
-@app.route("/popular-music")
+@app.route("/api/popular-music")
 def popular_music():
     conn = pymysql.connect(**DB_CONFIG)
     try:
@@ -124,8 +124,52 @@ def popular_music():
     finally:
         conn.close()
 
-@app.route("/user")
-def user_profile():
+def get_user_info_by_nickname(cursor, nickname):
+    cursor.execute("""
+        SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
+        FROM users u
+        LEFT JOIN user_attendance_summary uas ON u.user_id = uas.user_id
+        WHERE u.nickname = %s
+        LIMIT 1
+    """, (nickname,))
+    row = cursor.fetchone()
+    if not row:
+        return None
+
+    user_id, nickname, comment, total_count, last_attended = row
+
+    # 도전과제
+    cursor.execute("""
+        SELECT a.name, a.description, DATE(ua.achieved_at)
+        FROM user_achievements ua
+        JOIN achievements a ON ua.achievement_id = a.achievement_id
+        WHERE ua.user_id = %s
+        ORDER BY ua.achieved_at DESC
+    """, (user_id,))
+    achievements = [
+        {"name": r[0], "description": r[1], "achieved_at": r[2].strftime("%Y-%m-%d")}
+        for r in cursor.fetchall()
+    ]
+
+    # 프로필 이미지
+    img_filename = f"{nickname}.png"
+    img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
+    if not os.path.exists(img_path):
+        img_filename = "default.png"
+
+    return {
+        "user_id": user_id,
+        "nickname": nickname,
+        "comment": comment,
+        "total_count": total_count,
+        "last_attended": last_attended.strftime("%Y-%m-%d %H:%M") if last_attended else None,
+        "img": f"/static/profiles/{img_filename}",
+        "achievements": achievements,
+    }
+
+
+@app.route("/api/user-details")
+def user_details():
     nickname = request.args.get("nickname")
     if not nickname:
         return jsonify({"error": "닉네임 없음"}), 400
@@ -133,47 +177,21 @@ def user_profile():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            # 1️⃣ 사용자 기본 정보 가져오기
-            cursor.execute("""
-                SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
-                FROM users u
-                LEFT JOIN user_attendance_summary uas ON u.user_id = uas.user_id
-                WHERE u.nickname = %s
-                LIMIT 1
-            """, (nickname,))
-            result = cursor.fetchone()
-            if not result:
+            info = get_user_info_by_nickname(cursor, nickname)
+            if not info:
                 return jsonify({"error": "사용자 없음"}), 404
 
-            user_id = result[0]
-            nickname = result[1]  # 실제 대소문자 포함된 닉네임 재지정
+            user_id = info["user_id"]
 
-            img_filename = f"{nickname}.png"
-            img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
-            if not os.path.exists(img_path):
-                img_filename = "default.png"
-
-            # 2️⃣ 도전과제 목록 가져오기
-            cursor.execute("""
-                SELECT a.name, a.description, DATE(ua.achieved_at)
-                FROM user_achievements ua
-                JOIN achievements a ON ua.achievement_id = a.achievement_id
-                WHERE ua.user_id = %s
-                ORDER BY ua.achieved_at DESC
-            """, (user_id,))
-            achievements = [
-                {"name": row[0], "description": row[1], "achieved_at": row[2].strftime("%Y-%m-%d")}
-                for row in cursor.fetchall()
-            ]
-
+            # ✅ 재생시간, 곡 수
             cursor.execute("""
                 SELECT
                     (SELECT COALESCE(SUM(duration_sec), 0) FROM attendance WHERE user_id = %s),
                     (SELECT COUNT(*) FROM music_play WHERE user_id = %s)
             """, (user_id, user_id))
             play_duration_sec, song_play_count = cursor.fetchone()
-            
-            # 3️⃣ 최근 30일 참여 시간 (일별)
+
+            # ✅ 최근 30일 활동
             cursor.execute("""
                 SELECT DATE(enter_time) AS day, SUM(duration_sec)
                 FROM attendance
@@ -182,142 +200,112 @@ def user_profile():
                 ORDER BY day ASC
             """, (user_id,))
             raw = cursor.fetchall()
+            activity_map = {r[0]: r[1] for r in raw}
 
-            # 👉 결과를 dict로 변환
-            activity_map = {row[0]: row[1] for row in raw}
-
-            # 👉 최근 30일 날짜 생성
             today = date.today()
-            recent_30days = []
-            for i in range(30):
-                day = today - timedelta(days=29 - i)
-                sec = activity_map.get(day, 0)
-                recent_30days.append({
-                    "date": day.strftime("%Y-%m-%d"),
-                    "duration_sec": sec
-                })
+            recent_30days = [
+                {
+                    "date": (today - timedelta(days=29 - i)).strftime("%Y-%m-%d"),
+                    "duration_sec": activity_map.get(today - timedelta(days=29 - i), 0)
+                }
+                for i in range(30)
+            ]
 
+            # ✅ 통합 결과
+            info["play_duration_sec"] = play_duration_sec
+            info["song_play_count"] = song_play_count
+            info["recent_30days"] = recent_30days
 
-            # 4️⃣ 응답 JSON
-            return jsonify({
-                "nickname": nickname,
-                "comment": result[2],
-                "total_count": result[3],
-                "last_attended": result[4].strftime("%Y-%m-%d %H:%M") if result[4] else None,
-                "img": f"/static/profiles/{img_filename}",
-                "achievements": achievements,
-                "play_duration_sec": play_duration_sec,
-                "song_play_count": song_play_count,
-                "recent_30days": recent_30days  # ✅ 추가됨
-            })
+            return jsonify(info)
 
     finally:
         conn.close()
 
-@app.route("/")
-def index():
+@app.route("/api/ranking-users")
+def ranking_users():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            # 1️⃣ 누적 출석 상위 10명
             cursor.execute("""
-                SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
+                SELECT u.nickname
                 FROM user_attendance_summary uas
                 JOIN users u ON u.user_id = uas.user_id
                 ORDER BY uas.total_count DESC, uas.last_attended DESC
                 LIMIT 10
             """)
-            rows = cursor.fetchall()
+            nicknames = [row[0] for row in cursor.fetchall()]
 
             users = []
-            ranking_user_ids = set()
-            for rank, row in enumerate(rows, start=1):
-                user_id, nickname, comment, total_count, last_attended = row
-                ranking_user_ids.add(user_id)
+            for rank, nickname in enumerate(nicknames, start=1):
+                info = get_user_info_by_nickname(cursor, nickname)
+                if info:
+                    info["rank"] = rank
+                    users.append(info)
 
-                # 도전과제
-                cursor.execute("""
-                    SELECT a.name, a.description, DATE(ua.achieved_at)
-                    FROM user_achievements ua
-                    JOIN achievements a ON ua.achievement_id = a.achievement_id
-                    WHERE ua.user_id = %s
-                    ORDER BY ua.achieved_at DESC
-                """, (user_id,))
-                achievements = [
-                    {"name": a[0], "description": a[1], "achieved_at": a[2].strftime("%Y-%m-%d")}
-                    for a in cursor.fetchall()
-                ]
-
-                # 이미지
-                img_filename = f"{nickname}.png"
-                img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
-                if not os.path.exists(img_path):
-                    img_filename = "default.png"
-
-                users.append({
-                    "rank": rank,
-                    "nickname": nickname,
-                    "comment": comment,
-                    "total_count": total_count,
-                    "last_attended": last_attended,
-                    "img": f"/static/profiles/{img_filename}",
-                    "achievements": achievements
-                })
-
-            # 2️⃣ 랭킹에 없는 유저 6명 랜덤으로 뽑되, '아짱나'는 제외
-            placeholders = ",".join(str(uid) for uid in ranking_user_ids)
-            # 제외할 닉네임들
-            excluded_nicknames = ("아짱나", "미쿠")
-
-            # %s 플레이스홀더 여러 개 생성
-            nickname_placeholders = ",".join(["%s"] * len(excluded_nicknames))
-
-            # SQL 쿼리 수정
-            cursor.execute(f"""
-                SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
-                FROM users u
-                LEFT JOIN user_attendance_summary uas ON u.user_id = uas.user_id
-                WHERE u.user_id NOT IN ({placeholders})
-                AND u.nickname NOT IN ({nickname_placeholders})
-                ORDER BY RAND()
-                LIMIT 6
-            """, excluded_nicknames)
-            random_users = cursor.fetchall()
-            
-            thanks_users = []
-            for row in random_users:
-                user_id, nickname, comment, total_count, last_attended = row
-
-                # 도전과제 조회
-                cursor.execute("""
-                    SELECT a.name, a.description, DATE(ua.achieved_at)
-                    FROM user_achievements ua
-                    JOIN achievements a ON ua.achievement_id = a.achievement_id
-                    WHERE ua.user_id = %s
-                    ORDER BY ua.achieved_at DESC
-                """, (user_id,))
-                achievements = [
-                    {"name": a[0], "description": a[1], "achieved_at": a[2].strftime("%Y-%m-%d")}
-                    for a in cursor.fetchall()
-                ]
-
-                img_filename = f"{nickname}.png"
-                img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
-                if not os.path.exists(img_path):
-                    img_filename = "default.png"
-
-                thanks_users.append({
-                    "nickname": nickname,
-                    "comment": comment,
-                    "total_count": total_count,
-                    "last_attended": last_attended,
-                    "img": f"/static/profiles/{img_filename}",
-                    "achievements": achievements
-                })
-
-            return render_template("index.html", users=users, thanks_users=thanks_users)
+            return jsonify(users)
     finally:
         conn.close()
+
+@app.route("/api/random-users")
+def random_users():
+    excluded_ids = request.args.getlist("excluded_ids")  # 예: ?excluded_ids=3&excluded_ids=7
+    excluded_nicks = ("아짱나", "미쿠")
+
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            # 1. 무작위 닉네임 6개 선택
+            if excluded_ids:
+                placeholders = ",".join(["%s"] * len(excluded_ids))
+                nick_placeholders = ",".join(["%s"] * len(excluded_nicks))
+                query = f"""
+                    SELECT u.nickname
+                    FROM users u
+                    WHERE u.user_id NOT IN ({placeholders})
+                    AND u.nickname NOT IN ({nick_placeholders})
+                    ORDER BY RAND()
+                    LIMIT 6
+                """
+                cursor.execute(query, excluded_ids + list(excluded_nicks))
+            else:
+                query = f"""
+                    SELECT u.nickname
+                    FROM users u
+                    WHERE u.nickname NOT IN ({','.join(['%s'] * len(excluded_nicks))})
+                    ORDER BY RAND()
+                    LIMIT 6
+                """
+                cursor.execute(query, excluded_nicks)
+
+            nicknames = [row[0] for row in cursor.fetchall()]
+
+            # 2. 닉네임 기반으로 유저 정보 구성
+            users = []
+            for nickname in nicknames:
+                info = get_user_info_by_nickname(cursor, nickname)
+                if info:
+                    users.append(info)
+
+            return jsonify(users)
+    finally:
+        conn.close()
+
+
+@app.route("/api/achievements")
+def get_achievements():
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT name, description FROM achievements")
+            rows = cursor.fetchall()
+            return jsonify([{"name": row[0], "description": row[1]} for row in rows])
+    finally:
+        conn.close()
+
+
+@app.route("/")
+def serve_index():
+    return render_template("index.html")
 
 
 if __name__ == "__main__":

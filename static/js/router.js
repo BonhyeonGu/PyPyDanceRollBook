@@ -21,6 +21,13 @@ async function handleRouteChange() {
         break;
       }
 
+
+      case "#/allusers": {
+        const { renderAllusersPage } = await import("/static/js/allusers.js");
+        await renderAllusersPage(); // 내부에서 app.innerHTML 설정
+        break;
+      }
+
       case "#/achievements": {
         const { renderAchievementsPage } = await import("/static/js/achievements.js");
         await renderAchievementsPage(); // 내부에서 app.innerHTML 설정

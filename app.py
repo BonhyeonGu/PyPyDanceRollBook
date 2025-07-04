@@ -3,6 +3,7 @@ import pymysql
 import os
 import json
 from datetime import date, timedelta
+import random
 
 app = Flask(__name__)
 
@@ -290,17 +291,60 @@ def random_users():
     finally:
         conn.close()
 
+@app.route("/api/all-users")
+def all_users():
+    exclude_list = ["아짱나", "미쿠"]  # 제외할 닉네임들
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            # 플레이스홀더 생성 (e.g. %s, %s, %s)
+            placeholders = ', '.join(['%s'] * len(exclude_list))
+            query = f"SELECT nickname FROM users WHERE nickname NOT IN ({placeholders}) ORDER BY user_id ASC"
+            cursor.execute(query, exclude_list)
+
+            nicknames = [row[0] for row in cursor.fetchall()]
+            random.shuffle(nicknames)
+
+            users = []
+            for nickname in nicknames:
+                info = get_user_info_by_nickname(cursor, nickname)
+                if info:
+                    users.append(info)
+
+            return jsonify(users)
+    finally:
+        conn.close()
+
 
 @app.route("/api/achievements")
 def get_achievements():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT name, description FROM achievements")
+            cursor.execute("""
+                SELECT a.name, a.description,
+                       COUNT(ua.user_id) AS achieved_count,
+                       (SELECT COUNT(*) FROM users) AS total_users
+                FROM achievements a
+                LEFT JOIN user_achievements ua ON ua.achievement_id = a.achievement_id
+                GROUP BY a.achievement_id, a.name, a.description
+                ORDER BY a.name ASC
+            """)
             rows = cursor.fetchall()
-            return jsonify([{"name": row[0], "description": row[1]} for row in rows])
+            return jsonify([
+                {
+                    "name": row[0],
+                    "description": row[1],
+                    "achieved_count": row[2],
+                    "total_users": row[3],
+                    "percentage": round(row[2] / row[3] * 100, 1) if row[3] else 0
+                }
+                for row in rows
+            ])
     finally:
         conn.close()
+
+
 
 
 @app.route("/")

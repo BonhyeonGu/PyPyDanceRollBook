@@ -1,17 +1,19 @@
 // main.js
 
-import { onThemeChange } from "/static/js/theme.js";
+import {
+    onThemeChange
+} from "/static/js/theme.js";
 
 
 let excludedUserIds = new Set();
 
 export async function initMain() {
-  excludedUserIds = new Set();
-  const app = document.getElementById("app");
-  if (!app) return;
+    excludedUserIds = new Set();
+    const app = document.getElementById("app");
+    if (!app) return;
 
-  // 🔸 콘텐츠는 처음에 비가시 상태로 삽입됨
-  app.innerHTML = `
+    // 🔸 콘텐츠는 처음에 비가시 상태로 삽입됨
+    app.innerHTML = `
     <div id="main-content" class="opacity-0 translate-y-2 transition-all duration-500">
       <h1 class="text-xl font-bold mb-4">출석 랭킹</h1>
       <div id="ranking-list" class="space-y-4 mt-8"></div>
@@ -61,32 +63,32 @@ export async function initMain() {
     </div>
   `;
 
-  const searchBtn = document.getElementById("searchBtn");
-  const searchInput = document.getElementById("searchInput");
-  if (searchBtn && searchInput) {
-    searchBtn.addEventListener("click", searchUser);
-    searchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") searchUser();
-    });
-  }
-
-  try {
-    const rankingUsers = await fetch("/api/ranking-users").then(res => res.json());
-    await renderRankingList(rankingUsers);
-    await loadInitialThanksUsers(rankingUsers);
-    setupRefreshThanksButton();
-    await renderPopularMusic();
-    setupCalendarEvent();
-
-    // ✅ 준비 완료 후 콘텐츠를 자연스럽게 표시
-    const content = document.getElementById("main-content");
-    if (content) {
-      content.classList.remove("opacity-0", "translate-y-2");
-      content.classList.add("opacity-100", "translate-y-0");
+    const searchBtn = document.getElementById("searchBtn");
+    const searchInput = document.getElementById("searchInput");
+    if (searchBtn && searchInput) {
+        searchBtn.addEventListener("click", searchUser);
+        searchInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") searchUser();
+        });
     }
-  } catch (err) {
-    console.error("초기화 실패:", err);
-  }
+
+    try {
+        const rankingUsers = await fetch("/api/ranking-users").then(res => res.json());
+        await renderRankingList(rankingUsers);
+        await loadInitialThanksUsers(rankingUsers);
+        setupRefreshThanksButton();
+        await renderPopularMusic();
+        setupCalendarEvent();
+
+        // ✅ 준비 완료 후 콘텐츠를 자연스럽게 표시
+        const content = document.getElementById("main-content");
+        if (content) {
+            content.classList.remove("opacity-0", "translate-y-2");
+            content.classList.add("opacity-100", "translate-y-0");
+        }
+    } catch (err) {
+        console.error("초기화 실패:", err);
+    }
 }
 
 const PROFILE_BASE = "/static/profiles";
@@ -94,12 +96,12 @@ const PROFILE_BASE = "/static/profiles";
 let currentChart = null;
 
 onThemeChange((isDark) => {
-  if (currentChart && currentChart.canvas) {
-    const canvas = currentChart.canvas;
-    const labels = currentChart.data.labels;
-    const data = currentChart.data.datasets[0].data;
-    drawChart(canvas, labels, data, isDark);
-  }
+    if (currentChart && currentChart.canvas) {
+        const canvas = currentChart.canvas;
+        const labels = currentChart.data.labels;
+        const data = currentChart.data.datasets[0].data;
+        drawChart(canvas, labels, data, isDark);
+    }
 });
 
 function bindUserBoxEvents() {
@@ -226,13 +228,17 @@ async function renderRankingList() {
 
 let refreshBtn = null;
 
+
 function renderThanksUsers(users) {
     const container = document.getElementById("thanks-list");
     container.innerHTML = "";
 
     users.forEach(user => {
         const box = document.createElement("div");
-        box.className = "user-box bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center justify-between space-x-4 hover:shadow-lg transition-colors duration-300";
+        box.className = `
+      user-box bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center justify-between space-x-4
+      hover:shadow-lg transition-colors duration-300
+    `.trim();
         box.dataset.nickname = user.nickname;
         box.dataset.userId = user.user_id;
 
@@ -241,53 +247,65 @@ function renderThanksUsers(users) {
         const restCount = user.achievements.length - maxAchievements;
 
         const achievementsHtml = shown.map(ach => `
-            <div class="relative group">
-                <img src="/static/achievements/a_${ach.name}.png" alt="${ach.name} 아이콘"
-                class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-pointer">
-                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2
-                            bg-blue-100 dark:bg-blue-950 text-gray-800 dark:text-white text-xs px-4 py-3 rounded-xl
-                            border border-blue-300 dark:border-blue-700 shadow-lg
-                            opacity-0 group-hover:opacity-100 transition-opacity duration-200
-                            pointer-events-none z-50 text-center min-w-[20rem] max-w-[26rem] whitespace-normal">
-                <div class="font-bold text-blue-900 dark:text-blue-300 text-xs">${ach.name} (${ach.achieved_at})</div>
-                <div class="mt-2 flex flex-col gap-1">
-                    ${ach.description.split(",").map((part, idx) => `
-                    <div class="text-[11px] leading-snug ${idx > 0 ? 'italic' : ''} text-blue-${idx === 0 ? '400' : '500'} dark:text-blue-${idx === 0 ? '400' : '500'}">
-                        ${part.trim()}
-                    </div>`).join("")}
-                </div>
-                </div>
-            </div>
-        `).join("");
+      <div class="relative group">
+        <img src="/static/achievements/a_${ach.name}.png" alt="${ach.name} 아이콘"
+          class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-pointer">
+        <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2
+                    bg-blue-100 dark:bg-blue-950 text-gray-800 dark:text-white text-xs px-4 py-3 rounded-xl
+                    border border-blue-300 dark:border-blue-700 shadow-lg
+                    opacity-0 group-hover:opacity-100 transition-opacity duration-200
+                    pointer-events-none z-50 text-center min-w-[20rem] max-w-[26rem] whitespace-normal">
+          <div class="font-bold text-blue-900 dark:text-blue-300 text-xs">${ach.name} (${ach.achieved_at})</div>
+          <div class="mt-2 flex flex-col gap-1">
+            ${ach.description.split(",").map((part, idx) => `
+              <div class="text-[11px] leading-snug ${idx > 0 ? 'italic' : ''} text-blue-${idx === 0 ? '400' : '500'} dark:text-blue-${idx === 0 ? '400' : '500'}">
+                ${part.trim()}
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      </div>
+    `).join("");
 
         const showMoreHtml = restCount > 0 ? `
-            <div class="w-8 h-8 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded text-sm text-gray-600 dark:text-gray-300">
-                +${restCount}
-            </div>
-        ` : "";
+      <div class="w-8 h-8 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded text-sm text-gray-600 dark:text-gray-300">
+        +${restCount}
+      </div>
+    ` : "";
 
         box.innerHTML = `
-            <img src="${user.img}" alt="${user.nickname} 프로필"
-                class="w-16 h-16 rounded-full object-cover border border-gray-300 dark:border-gray-600 shadow-sm">
+      <img src="${user.img}" alt="${user.nickname} 프로필"
+          class="w-16 h-16 rounded-full object-cover border border-gray-300 dark:border-gray-600 shadow-sm">
 
-            <div class="flex-1">
-                <div class="text-lg font-semibold text-gray-800 dark:text-white">${user.nickname}</div>
-                <div class="text-gray-500 dark:text-gray-300 text-sm">${user.comment || '한줄 소개 없음'}</div>
-                <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">누적 출석: ${user.total_count}회</div>
-                <div class="text-xs text-gray-600 dark:text-gray-300">마지막 접속: ${user.last_attended}</div>
-            </div>
+      <div class="flex-1">
+          <div class="text-lg font-semibold text-gray-800 dark:text-white">${user.nickname}</div>
+          <div class="text-gray-500 dark:text-gray-300 text-sm">${user.comment || '한줄 소개 없음'}</div>
+          <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">누적 출석: ${user.total_count}회</div>
+          <div class="text-xs text-gray-600 dark:text-gray-300">마지막 접속: ${user.last_attended}</div>
+      </div>
 
-            <div class="flex flex-wrap gap-2 ml-4">
-                ${achievementsHtml}
-                ${showMoreHtml}
-            </div>
-        `;
+      <div class="flex flex-wrap gap-2 ml-4">
+        ${achievementsHtml}
+        ${showMoreHtml}
+      </div>
+    `;
+
+        // ✅ 애니메이션 효과 직접 스타일로 적용
+        box.style.opacity = "0";
+        box.style.transform = "translateY(0.5rem)";
+        box.style.transition = "opacity 0.4s ease, transform 0.4s ease";
 
         container.appendChild(box);
+        void box.offsetWidth; // 강제 리플로우
+        box.style.opacity = "1";
+        box.style.transform = "translateY(0)";
     });
+    setTimeout(() => {
+        bindUserBoxEvents();
+    }, 400); // transition과 동일 시간
 
-    bindUserBoxEvents();
 }
+
 
 async function loadInitialThanksUsers(initialUsers) {
     initialUsers.forEach(u => excludedUserIds.add(u.user_id));
@@ -404,35 +422,45 @@ function setupCalendarEvent() {
             participants.forEach((p) => {
                 const el = document.createElement("div");
                 el.className = `
-                    user-box
-                    bg-white dark:bg-gray-800 text-gray-800 dark:text-white
-                    rounded-xl shadow flex items-stretch gap-4
-                    transition-colors duration-300 min-h-[110px] pl-0 pr-4
-                `.trim();
+          user-box bg-white dark:bg-gray-800 text-gray-800 dark:text-white
+          rounded-xl shadow flex items-stretch gap-4
+          transition-all duration-300 min-h-[110px] pl-0 pr-4
+        `.trim();
 
                 el.dataset.nickname = p.nickname;
 
                 el.innerHTML = `
-                    <div class="h-[110px] w-[64px] overflow-hidden shrink-0 rounded-l-xl">
-                      <img src="${p.img}" alt="${p.nickname} 프로필"
-                          class="w-[84px] h-full object-cover object-[40%] border border-gray-300 dark:border-gray-600"
-                          onerror="this.src='${PROFILE_BASE}/default.png'">
-                    </div>
+          <div class="h-[110px] w-[64px] overflow-hidden shrink-0 rounded-l-xl">
+            <img src="${p.img}" alt="${p.nickname} 프로필"
+                class="w-[84px] h-full object-cover object-[40%] border border-gray-300 dark:border-gray-600"
+                onerror="this.src='${PROFILE_BASE}/default.png'">
+          </div>
 
-                    <div class="flex-1 flex flex-col justify-center">
-                      <div class="font-semibold">${p.nickname}</div>
-                      <div class="text-sm text-gray-500 dark:text-gray-300">${p.comment || '한줄 소개 없음'}</div>
-                    </div>
+          <div class="flex-1 flex flex-col justify-center">
+            <div class="font-semibold">${p.nickname}</div>
+            <div class="text-sm text-gray-500 dark:text-gray-300">${p.comment || '한줄 소개 없음'}</div>
+          </div>
 
-                    <div class="text-sm text-gray-700 dark:text-gray-300 text-right whitespace-nowrap self-center">
-                      누적 ${p.total_count}회<br>
-                      체류 ${p.duration}분
-                    </div>
-                `;
+          <div class="text-sm text-gray-700 dark:text-gray-300 text-right whitespace-nowrap self-center">
+            누적 ${p.total_count}회<br>
+            체류 ${p.duration}분
+          </div>
+        `;
+
+                // 👇 애니메이션 적용
+                el.style.opacity = "0";
+                el.style.transform = "translateY(0.5rem)";
+                el.style.transition = "opacity 0.4s ease, transform 0.4s ease";
 
                 pList.appendChild(el);
+                void el.offsetWidth; // 강제 리플로우
+                el.style.opacity = "1";
+                el.style.transform = "translateY(0)";
             });
-            bindUserBoxEvents();
+
+            setTimeout(() => {
+                bindUserBoxEvents();
+            }, 400); // transition과 동일 시간
         }
 
         if (musics.length === 0) {
@@ -441,20 +469,20 @@ function setupCalendarEvent() {
             musics.forEach(m => {
                 const el = document.createElement("div");
                 el.className = `
-                    bg-white dark:bg-gray-800 text-gray-800 dark:text-white
-                    rounded-xl shadow p-3 transition-colors duration-300 min-h-[110px]
-                    relative group
-                `.trim();
+          bg-white dark:bg-gray-800 text-gray-800 dark:text-white
+          rounded-xl shadow p-3 transition-all duration-300 min-h-[110px]
+          relative group
+        `.trim();
 
                 el.innerHTML = `
-                    <div class="text-sm text-gray-500 dark:text-gray-300">${m.played_at}</div>
-                    <div class="font-semibold text-sm mt-1">${m.title}</div>
-                    <div class="text-sm text-gray-600 dark:text-gray-400">by ${m.user}</div>
-                    <div class="absolute top-2 right-2 flex gap-5">
-                      <button class="text-xs text-blue-500 hover:underline copy-title">이름 복사</button>
-                      <button class="text-xs text-blue-500 hover:underline copy-url">URL 복사</button>
-                    </div>
-                `;
+          <div class="text-sm text-gray-500 dark:text-gray-300">${m.played_at}</div>
+          <div class="font-semibold text-sm mt-1">${m.title}</div>
+          <div class="text-sm text-gray-600 dark:text-gray-400">by ${m.user}</div>
+          <div class="absolute top-2 right-2 flex gap-5">
+            <button class="text-xs text-blue-500 hover:underline copy-title">이름 복사</button>
+            <button class="text-xs text-blue-500 hover:underline copy-url">URL 복사</button>
+          </div>
+        `;
 
                 el.querySelector(".copy-title").addEventListener("click", (e) => {
                     e.stopPropagation();
@@ -466,15 +494,23 @@ function setupCalendarEvent() {
                     navigator.clipboard.writeText(m.url).then(() => showToast("URL이 복사되었습니다."));
                 });
 
+                // 👇 애니메이션 적용
+                el.style.opacity = "0";
+                el.style.transform = "translateY(0.5rem)";
+                el.style.transition = "opacity 0.4s ease, transform 0.4s ease";
+
                 mList.appendChild(el);
+                void el.offsetWidth; // 강제 리플로우
+                el.style.opacity = "1";
+                el.style.transform = "translateY(0)";
             });
         }
     });
 }
 
 
-//=================================================================================================================================
 
+//=================================================================================================================================
 
 
 function drawChart(canvas, labels, data, isDark) {
@@ -662,7 +698,19 @@ async function searchUser() {
 
         }
 
+        // ✅ 애니메이션 초기 클래스 삽입
+        card.style.opacity = "0";
+        card.style.transform = "translateY(0.5rem)";
+        card.style.transition = "opacity 0.4s ease, transform 0.4s ease";
         resultBox.appendChild(card);
+
+        // 강제 리플로우
+        card.getBoundingClientRect(); // 또는 void card.offsetWidth;
+
+        // 애니메이션 적용
+        card.style.opacity = "1";
+        card.style.transform = "translateY(0)";
+
     } catch (err) {
         resultBox.innerHTML = `<div class="text-sm text-red-500">[오류] ${err.message}</div>`;
     }

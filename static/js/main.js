@@ -129,12 +129,13 @@ function bindUserBoxEvents() {
 function showToast(message) {
     const toast = document.getElementById("copyToast");
     toast.textContent = message;
-    toast.classList.remove("hide");
-    toast.classList.add("show");
+
+    toast.style.opacity = "1";
+    toast.style.pointerEvents = "auto";
 
     setTimeout(() => {
-        toast.classList.remove("show");
-        toast.classList.add("hide");
+        toast.style.opacity = "0";
+        toast.style.pointerEvents = "none";
     }, 1500);
 }
 

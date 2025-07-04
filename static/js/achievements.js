@@ -32,9 +32,5 @@ export async function renderAchievementsPage() {
       `<div class="text-red-500">도전과제를 불러오지 못했습니다.</div>`;
   }
 
-  // ✅ 애니메이션 복귀
-  requestAnimationFrame(() => {
-    app.classList.remove("translate-x-4", "opacity-0");
-    app.classList.add("translate-x-0", "opacity-100");
-  });
+
 }

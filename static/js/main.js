@@ -2,103 +2,97 @@
 
 import { onThemeChange } from "/static/js/theme.js";
 
-// 👇 async 초기화 함수
+
+let excludedUserIds = new Set();
+
 export async function initMain() {
-    const app = document.getElementById("app");
-    if (!app) return;
+  excludedUserIds = new Set();
+  const app = document.getElementById("app");
+  if (!app) return;
 
-    app.innerHTML = `
-    <!-- 상단 제목 -->
-    <h1 class="text-xl font-bold mb-4">출석 랭킹</h1>
+  // 🔸 콘텐츠는 처음에 비가시 상태로 삽입됨
+  app.innerHTML = `
+    <div id="main-content" class="opacity-0 translate-y-2 transition-all duration-500">
+      <h1 class="text-xl font-bold mb-4">출석 랭킹</h1>
+      <div id="ranking-list" class="space-y-4 mt-8"></div>
 
-    <!-- 랭킹 리스트 -->
-    <div id="ranking-list" class="space-y-4 mt-8"></div>
-
-    <!-- 히든 스타 섹션 -->
-    <div class="mt-16">
-    <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-bold">히든 스타</h2>
-        <button id="refreshThanksBtn" class="text-sm px-3 py-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition">
-        🔄
-        </button>
-    </div>
-    <div id="thanks-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-    </div>
-
-    <!-- 인기곡 10선 -->
-    <div class="mt-16">
-      <h2 class="text-xl font-bold mb-4">최근 인기곡 (7 days)</h2>
-      <div id="popular-music" class="grid grid-cols-2 md:grid-cols-5 gap-4"></div>
-    </div>
-
-    <!-- 유저 검색 -->
-    <div class="mt-16">
-      <h2 class="text-xl font-bold mb-2">유저 검색</h2>
-      <div class="flex space-x-2">
-        <input id="searchInput" type="text" placeholder="닉네임 입력..." class="flex-1 border px-4 py-2 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 transition-colors duration-300" />
-        <button id="searchBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition">검색</button>
-      </div>
-      <div id="searchResult" class="mt-4 mb-4"></div>
-    </div>
-
-    <!-- 날짜별 참여자 및 음악 -->
-    <div class="mt-16">
-      <h2 class="text-xl font-semibold mb-4">날짜별 참여자 및 재생 음악 보기</h2>
-      <input type="date" id="calendar" class="border px-4 py-2 rounded mb-4 bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 transition-colors duration-300">
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="day-results">
-        <div>
-          <h3 class="text-lg font-bold mb-2">참여자</h3>
-          <div id="participant-list" class="space-y-2"></div>
+      <div class="mt-16">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-bold">히든 스타</h2>
+          <button id="refreshThanksBtn" class="text-sm px-3 py-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+            🔄
+          </button>
         </div>
-        <div>
-          <h3 class="text-lg font-bold mb-2">음악</h3>
-          <div id="music-list" class="space-y-2"></div>
+        <div id="thanks-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+      </div>
+
+      <div class="mt-16">
+        <h2 class="text-xl font-bold mb-4">최근 인기곡 (7 days)</h2>
+        <div id="popular-music" class="grid grid-cols-2 md:grid-cols-5 gap-4"></div>
+      </div>
+
+      <div class="mt-16">
+        <h2 class="text-xl font-bold mb-2">유저 검색</h2>
+        <div class="flex space-x-2">
+          <input id="searchInput" type="text" placeholder="닉네임 입력..." class="flex-1 border px-4 py-2 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 transition-colors duration-300" />
+          <button id="searchBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition">검색</button>
+        </div>
+        <div id="searchResult" class="mt-4 mb-4"></div>
+      </div>
+
+      <div class="mt-16">
+        <h2 class="text-xl font-semibold mb-4">날짜별 참여자 및 재생 음악 보기</h2>
+        <input type="date" id="calendar" class="border px-4 py-2 rounded mb-4 bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 transition-colors duration-300">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="day-results">
+          <div>
+            <h3 class="text-lg font-bold mb-2">참여자</h3>
+            <div id="participant-list" class="space-y-2"></div>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold mb-2">음악</h3>
+            <div id="music-list" class="space-y-2"></div>
+          </div>
         </div>
       </div>
+
+      <div id="copyToast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-black text-white text-sm px-4 py-2 rounded z-50 opacity-0 pointer-events-none transition-opacity duration-300">
+        복사되었습니다.
+      </div>
     </div>
+  `;
 
-    <!-- 복사 알림 -->
-    <div id="copyToast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-black text-white text-sm px-4 py-2 rounded z-50 opacity-0 pointer-events-none transition-opacity duration-300">
-      복사되었습니다.
-    </div>
-    `;
-    
-    const searchBtn = document.getElementById("searchBtn");
-    const searchInput = document.getElementById("searchInput");
-
-    if (searchBtn && searchInput) {
-        searchBtn.addEventListener("click", searchUser);
-        searchInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-            searchUser();
-        }
-        });
-    }
-    
-    try {
-        const rankingUsers = await fetch("/api/ranking-users").then(res => res.json());
-        await renderRankingList(rankingUsers);
-        await loadInitialThanksUsers(rankingUsers);
-        setupRefreshThanksButton();
-        await renderPopularMusic();
-        setupCalendarEvent();
-
-    } catch (err) {
-        console.error("초기화 실패:", err);
-    }
-
-    // ✅ 모두 준비된 후 애니메이션 IN
-    requestAnimationFrame(() => {
-        app.classList.remove("translate-x-4", "opacity-0");
-        app.classList.add("translate-x-0", "opacity-100");
+  const searchBtn = document.getElementById("searchBtn");
+  const searchInput = document.getElementById("searchInput");
+  if (searchBtn && searchInput) {
+    searchBtn.addEventListener("click", searchUser);
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") searchUser();
     });
+  }
+
+  try {
+    const rankingUsers = await fetch("/api/ranking-users").then(res => res.json());
+    await renderRankingList(rankingUsers);
+    await loadInitialThanksUsers(rankingUsers);
+    setupRefreshThanksButton();
+    await renderPopularMusic();
+    setupCalendarEvent();
+
+    // ✅ 준비 완료 후 콘텐츠를 자연스럽게 표시
+    const content = document.getElementById("main-content");
+    if (content) {
+      content.classList.remove("opacity-0", "translate-y-2");
+      content.classList.add("opacity-100", "translate-y-0");
+    }
+  } catch (err) {
+    console.error("초기화 실패:", err);
+  }
 }
 
 const PROFILE_BASE = "/static/profiles";
 
-
 let currentChart = null;
+
 onThemeChange((isDark) => {
   if (currentChart && currentChart.canvas) {
     const canvas = currentChart.canvas;
@@ -161,7 +155,7 @@ async function renderRankingList() {
             `;
             userBox.dataset.nickname = user.nickname;
 
-            const maxAchievements = 4;
+            const maxAchievements = 3;
             const shown = user.achievements.slice(0, maxAchievements);
             const restCount = user.achievements.length - maxAchievements;
 
@@ -230,8 +224,6 @@ async function renderRankingList() {
 
 //=================================================================================================================================
 
-
-const excludedUserIds = new Set(); // 처음부터 랭킹 유저 포함
 let refreshBtn = null;
 
 function renderThanksUsers(users) {
@@ -244,7 +236,7 @@ function renderThanksUsers(users) {
         box.dataset.nickname = user.nickname;
         box.dataset.userId = user.user_id;
 
-        const maxAchievements = 4;
+        const maxAchievements = 2;
         const shown = user.achievements.slice(0, maxAchievements);
         const restCount = user.achievements.length - maxAchievements;
 
@@ -669,7 +661,6 @@ async function searchUser() {
             drawChart(canvas, labels, data, isDark);
 
         }
-
 
         resultBox.appendChild(card);
     } catch (err) {

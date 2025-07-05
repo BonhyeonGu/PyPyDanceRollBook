@@ -61,10 +61,6 @@ export async function initMain() {
           </div>
         </div>
       </div>
-
-      <div id="copyToast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-black text-white text-sm px-4 py-2 rounded z-50 opacity-0 pointer-events-none transition-opacity duration-300">
-        복사되었습니다.
-      </div>
     </div>
   `;
 
@@ -140,18 +136,27 @@ function bindUserBoxEvents() {
 
 function showToast(message) {
     const toast = document.getElementById("copyToast");
+    if (!toast) return;
+
+    // 텍스트 지정
     toast.textContent = message;
 
-    // 👉 클래스 기반 숨김 제거
+    // 기존 class 제거
     toast.classList.remove("opacity-0", "pointer-events-none");
 
-    // 👉 스타일 기반 보이기
+    // 스타일 설정 강제 초기화
+    toast.style.transition = "opacity 0.3s ease";
     toast.style.opacity = "1";
     toast.style.pointerEvents = "auto";
 
-    // 👉 1.5초 후 다시 숨김 처리
-    setTimeout(() => {
+    // 기존 timeout 제거를 위한 보조: 여러 호출 대비
+    clearTimeout(toast._hideTimer);
+
+    // 일정 시간 후 숨김 처리
+    toast._hideTimer = setTimeout(() => {
         toast.classList.add("opacity-0", "pointer-events-none");
+        toast.style.opacity = "0";
+        toast.style.pointerEvents = "none";
     }, 1500);
 }
 

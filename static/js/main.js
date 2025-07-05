@@ -15,7 +15,12 @@ export async function initMain() {
     // 🔸 콘텐츠는 처음에 비가시 상태로 삽입됨
     app.innerHTML = `
     <div id="main-content" class="opacity-0 translate-y-2 transition-all duration-500">
-      <h1 class="text-xl font-bold mb-4">출석 랭킹</h1>
+      <div class="flex justify-between items-center mb-4">
+        <h1 class="text-xl font-bold">출석 랭킹</h1>
+        <button id="rankingModeBtn" class="text-sm px-3 py-1 rounded bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 transition">
+          🗓️ 주간 랭킹
+        </button>
+      </div>
       <div id="ranking-list" class="space-y-4 mt-8"></div>
 
       <div class="mt-16">
@@ -73,14 +78,20 @@ export async function initMain() {
     }
 
     try {
-        const rankingUsers = await fetch("/api/ranking-users").then(res => res.json());
-        await renderRankingList(rankingUsers);
-        await loadInitialThanksUsers(rankingUsers);
+        setupRankingModeButton(); // 버튼 먼저 설정
+
+        // 🔹 주간 랭킹 유저를 불러오고 ID 목록 추출
+        const rankingUsers = await renderRankingList("weekly");
+        const excludedIds = rankingUsers.map(u => u.user_id);
+        excludedUserIds = new Set(excludedIds);
+
+        // 🔹 히든 스타 초기 로딩 시, 제외된 ID 기반
+        await loadInitialThanksUsers(excludedIds, "weekly");
+
         setupRefreshThanksButton();
         await renderPopularMusic();
         setupCalendarEvent();
 
-        // ✅ 준비 완료 후 콘텐츠를 자연스럽게 표시
         const content = document.getElementById("main-content");
         if (content) {
             content.classList.remove("opacity-0", "translate-y-2");
@@ -90,6 +101,7 @@ export async function initMain() {
         console.error("초기화 실패:", err);
     }
 }
+
 
 const PROFILE_BASE = "/static/profiles";
 
@@ -130,25 +142,48 @@ function showToast(message) {
     const toast = document.getElementById("copyToast");
     toast.textContent = message;
 
+    // 👉 클래스 기반 숨김 제거
+    toast.classList.remove("opacity-0", "pointer-events-none");
+
+    // 👉 스타일 기반 보이기
     toast.style.opacity = "1";
     toast.style.pointerEvents = "auto";
 
+    // 👉 1.5초 후 다시 숨김 처리
     setTimeout(() => {
-        toast.style.opacity = "0";
-        toast.style.pointerEvents = "none";
+        toast.classList.add("opacity-0", "pointer-events-none");
     }, 1500);
 }
 
+
 //=================================================================================================================================
 
-
-async function renderRankingList() {
+async function renderRankingList(mode = "total") {
     const container = document.getElementById("ranking-list");
+
+    // 🔸 현재 높이 기억
+    const originalHeight = container.offsetHeight;
+    container.style.minHeight = originalHeight + "px";
+
+    container.style.transition = "opacity 0.3s ease";
+    container.style.opacity = "0";
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     container.innerHTML = "";
+    container.style.opacity = "1";
 
     try {
-        const res = await fetch("/api/ranking-users");
+        const res = await fetch(`/api/ranking-users?mode=${mode}`);
         const users = await res.json();
+
+        // 🔸 순위 값 직접 부여
+        users.forEach((u, i) => u.rank = i + 1);
+
+        // 🔸 출석 텍스트 라벨
+        const attendanceLabel =
+            mode === "weekly" ? "주간 출석" :
+            mode === "monthly" ? "월간 출석" :
+            "누적 출석";
 
         users.forEach(user => {
             const userBox = document.createElement("div");
@@ -157,6 +192,7 @@ async function renderRankingList() {
                 hover:shadow-lg transition-colors duration-300
             `;
             userBox.dataset.nickname = user.nickname;
+            userBox.dataset.userId = user.user_id;  // ✅ 히든 스타 제외 처리를 위한 ID 속성 추가
 
             const maxAchievements = 3;
             const shown = user.achievements.slice(0, maxAchievements);
@@ -209,7 +245,7 @@ async function renderRankingList() {
                 </div>
 
                 <div class="text-right text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap">
-                    <div>누적 출석: <span class="font-medium text-gray-800 dark:text-white">${user.total_count}</span>회</div>
+                    <div>${attendanceLabel}: <span class="font-medium text-gray-800 dark:text-white">${user.total_count}</span>회</div>
                     <div class="text-xs">마지막 접속: ${user.last_attended}</div>
                 </div>
             `;
@@ -218,11 +254,68 @@ async function renderRankingList() {
         });
 
         bindUserBoxEvents();
+        setTimeout(() => {
+            container.style.minHeight = "";
+        }, 300);
+
+        return users;
     } catch (err) {
         container.innerHTML = `<div class="text-red-500">랭킹 정보를 불러오지 못했습니다.</div>`;
         console.error("랭킹 로드 오류:", err);
     }
 }
+
+
+
+
+
+let rankingMode = "weekly";
+const rankingModes = ["weekly", "monthly", "total"];
+const rankingModeLabels = {
+    weekly: "🗓️ 주간 랭킹",
+    monthly: "📅 월간 랭킹",
+    total: "🏆 누적 랭킹"
+};
+
+function setupRankingModeButton() {
+    const btn = document.getElementById("rankingModeBtn");
+    if (!btn) return;
+
+    btn.addEventListener("click", async () => {
+        const content = document.getElementById("main-content");
+
+        // 🔸 전환 애니메이션 시작
+        if (content) {
+            content.classList.add("opacity-0", "translate-y-2");
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
+        const nextIndex = (rankingModes.indexOf(rankingMode) + 1) % rankingModes.length;
+        rankingMode = rankingModes[nextIndex];
+        btn.textContent = rankingModeLabels[rankingMode];
+
+        // ✅ 리셋
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = "🔄";
+        }
+
+        excludedUserIds = new Set();
+        const rankingUsers = await renderRankingList(rankingMode);
+        const excludedIds = rankingUsers.map(u => u.user_id);
+        excludedUserIds = new Set(excludedIds);
+
+        await loadInitialThanksUsers(excludedIds, rankingMode);
+
+        // 🔸 전환 애니메이션 종료
+        if (content) {
+            content.classList.remove("opacity-0", "translate-y-2");
+            content.classList.add("opacity-100", "translate-y-0");
+        }
+    });
+}
+
+
 
 
 //=================================================================================================================================
@@ -308,14 +401,23 @@ function renderThanksUsers(users) {
 }
 
 
-async function loadInitialThanksUsers(initialUsers) {
+async function loadInitialThanksUsers(initialUsers, mode = "weekly") {
     initialUsers.forEach(u => excludedUserIds.add(u.user_id));
-    await loadRandomUsers(Array.from(excludedUserIds));
+    await loadRandomUsers(Array.from(excludedUserIds), mode);
 }
 
-async function loadRandomUsers(excludedIdList) {
-    const params = excludedIdList.map(id => `excluded_ids=${encodeURIComponent(id)}`).join("&");
-    const res = await fetch(`/api/random-users?${params}`);
+async function loadRandomUsers(excludedIdList, mode = "weekly") {
+    const container = document.getElementById("thanks-list");
+
+    // 🔸 현재 화면에 표시된 유저 ID도 제외해야 함
+    const displayedIds = Array.from(container.querySelectorAll(".user-box[data-user-id]"))
+        .map(box => parseInt(box.dataset.userId));
+
+    // 🔸 모든 제외 ID 합치고 중복 제거
+    const allExcluded = Array.from(new Set([...excludedIdList, ...displayedIds]));
+
+    const params = allExcluded.map(id => `excluded_ids=${encodeURIComponent(id)}`).join("&");
+    const res = await fetch(`/api/random-users?mode=${mode}&${params}`);
     const users = await res.json();
 
     if (users.length === 0 && refreshBtn) {
@@ -324,9 +426,10 @@ async function loadRandomUsers(excludedIdList) {
         return;
     }
 
-    users.forEach(u => excludedUserIds.add(u.user_id)); // 중복 방지용
+    users.forEach(u => excludedUserIds.add(u.user_id)); // 다시 중복 방지용 set에 반영
     renderThanksUsers(users);
 }
+
 
 function setupRefreshThanksButton() {
     const button = document.getElementById("refreshThanksBtn");
@@ -352,7 +455,6 @@ function setupRefreshThanksButton() {
 
 //인기노래
 async function renderPopularMusic() {
-    document.getElementById("copyToast").classList.add("hide");
     const res = await fetch("/api/popular-music");
     const data = await res.json();
     const box = document.getElementById("popular-music");

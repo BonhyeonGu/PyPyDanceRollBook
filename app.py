@@ -2,7 +2,7 @@ from flask import Flask, render_template, jsonify, request, send_from_directory
 import pymysql
 import os
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import random
 
 app = Flask(__name__)
@@ -224,29 +224,72 @@ def user_details():
 
 @app.route("/api/ranking-users")
 def ranking_users():
+    mode = request.args.get("mode", "total")
+
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT u.nickname
-                FROM user_attendance_summary uas
-                JOIN users u ON u.user_id = uas.user_id
-                ORDER BY uas.total_count DESC, uas.last_attended DESC
-                LIMIT 10
-            """)
-            nicknames = [row[0] for row in cursor.fetchall()]
+            if mode == "weekly":
+                today = datetime.today()
+                start_of_week = today - timedelta(days=today.weekday())  # 월요일
+                start_str = start_of_week.strftime("%Y-%m-%d 00:00:00")
+                end_str = today.strftime("%Y-%m-%d 23:59:59")
+
+                cursor.execute("""
+                    SELECT u.nickname, COUNT(*) AS count
+                    FROM attendance a
+                    JOIN users u ON u.user_id = a.user_id
+                    WHERE a.enter_time BETWEEN %s AND %s
+                    GROUP BY u.user_id
+                    ORDER BY count DESC
+                    LIMIT 10
+                """, (start_str, end_str))
+
+            elif mode == "monthly":
+                today = datetime.today()
+                start_of_month = today.replace(day=1)
+                start_str = start_of_month.strftime("%Y-%m-%d 00:00:00")
+                end_str = today.strftime("%Y-%m-%d 23:59:59")
+
+                cursor.execute("""
+                    SELECT u.nickname, COUNT(*) AS count
+                    FROM attendance a
+                    JOIN users u ON u.user_id = a.user_id
+                    WHERE a.enter_time BETWEEN %s AND %s
+                    GROUP BY u.user_id
+                    ORDER BY count DESC
+                    LIMIT 10
+                """, (start_str, end_str))
+
+            else:  # total
+                cursor.execute("""
+                    SELECT u.nickname
+                    FROM user_attendance_summary uas
+                    JOIN users u ON u.user_id = uas.user_id
+                    ORDER BY uas.total_count DESC, uas.last_attended DESC
+                    LIMIT 10
+                """)
+
+            rows = cursor.fetchall()
+            nicknames = [row[0] for row in rows]
 
             users = []
-            for rank, nickname in enumerate(nicknames, start=1):
+            for rank, row in enumerate(rows, start=1):
+                nickname = row[0]
+                count = row[1] if len(row) > 1 else None
                 info = get_user_info_by_nickname(cursor, nickname)
                 if info:
                     info["rank"] = rank
+                    if count is not None:
+                        info["total_count"] = count  # ⭐ 주간/월간 출석 수
                     users.append(info)
 
             return jsonify(users)
+
     finally:
         conn.close()
 
+        
 @app.route("/api/random-users")
 def random_users():
     excluded_ids = request.args.getlist("excluded_ids")  # 예: ?excluded_ids=3&excluded_ids=7

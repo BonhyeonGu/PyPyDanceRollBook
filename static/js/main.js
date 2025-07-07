@@ -86,7 +86,21 @@ export async function initMain() {
 
         setupRefreshThanksButton();
         await renderPopularMusic();
-        setupCalendarEvent();
+
+        const calendarInput = document.getElementById("calendar");
+        if (calendarInput) {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yyyy = yesterday.getFullYear();
+            const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+            const dd = String(yesterday.getDate()).padStart(2, '0');
+            calendarInput.value = `${yyyy}-${mm}-${dd}`;
+
+            // 🔹 어제 날짜에 해당하는 데이터 자동 로딩
+            const fakeChangeEvent = { target: calendarInput };
+            setupCalendarEvent(); // 먼저 이벤트 바인딩
+            calendarInput.dispatchEvent(new Event('change')); // change 이벤트 트리거
+        }
 
         const content = document.getElementById("main-content");
         if (content) {
@@ -195,7 +209,7 @@ async function renderRankingList(mode = "total") {
             }, 300);
             return [];
         }
-        
+
         // 🔸 출석 텍스트 라벨
         const attendanceLabel =
             mode === "weekly" ? "주간 출석" :

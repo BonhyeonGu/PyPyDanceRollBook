@@ -183,7 +183,19 @@ async function renderRankingList(mode = "total") {
 
         // 🔸 순위 값 직접 부여
         users.forEach((u, i) => u.rank = i + 1);
-
+        // ✅ 유저 없을 경우 안내 메시지 표시
+        if (users.length === 0) {
+            container.innerHTML = `
+                <div class="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
+                    현재 기간에 기록된 출석 정보가 없습니다.
+                </div>
+            `;
+            setTimeout(() => {
+                container.style.minHeight = "";
+            }, 300);
+            return [];
+        }
+        
         // 🔸 출석 텍스트 라벨
         const attendanceLabel =
             mode === "weekly" ? "주간 출석" :

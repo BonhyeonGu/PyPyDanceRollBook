@@ -80,9 +80,12 @@ class PyPyDanceLogAnalyzer:
                 current = None
         return ranges
 
+
     def analyze_range(self, lines, start_idx, end_idx):
-        join_times = {}
-        left_times = {}
+        from bisect import bisect_right
+
+        join_times = defaultdict(list)
+        left_times = defaultdict(list)
         range_end_time = self.parse_time(lines[end_idx][:19])
 
         for i in range(start_idx, end_idx + 1):
@@ -90,29 +93,48 @@ class PyPyDanceLogAnalyzer:
             jm = self.join_pattern.search(line)
             if jm:
                 ts = self.parse_time(jm.group(1))
-                name = jm.group(2).strip() 
-                if name not in join_times:
-                    join_times[name] = ts
+                name = jm.group(2).strip()
+                join_times[name].append(ts)
 
             lm = self.left_pattern.search(line)
             if lm:
                 ts = self.parse_time(lm.group(1))
-                name = lm.group(2).strip() 
-                left_times[name] = ts
+                name = lm.group(2).strip()
+                left_times[name].append(ts)
 
-        for name, join_time in join_times.items():
+        for name in join_times:
             if self.consented_users and name not in self.consented_users:
-                continue  # 동의하지 않은 사람은 무시
-            leave_time = left_times.get(name, range_end_time)
-            duration = leave_time - join_time
-            if duration > timedelta(seconds=0):
+                continue
+
+            joins = sorted(join_times[name])
+            leaves = sorted(left_times.get(name, []))
+            j, l = 0, 0
+            total_duration = timedelta(0)
+
+            while j < len(joins):
+                join_time = joins[j]
+                # leave가 남아있고 join 이후인 첫 leave를 찾는다
+                while l < len(leaves) and leaves[l] < join_time:
+                    l += 1
+                if l < len(leaves):
+                    leave_time = leaves[l]
+                    l += 1
+                else:
+                    leave_time = range_end_time
+                duration = leave_time - join_time
+                if duration.total_seconds() > 0:
+                    total_duration += duration
+                j += 1
+
+            if total_duration > timedelta(0):
                 yield {
                     "type": "attendance",
                     "name": name,
-                    "start": join_time,
+                    "start": joins[0],
                     "end": leave_time,
-                    "duration": duration
+                    "duration": total_duration
                 }
+
 
     def extract_music_logs(self, lines):
         last_entries = deque(maxlen=5)

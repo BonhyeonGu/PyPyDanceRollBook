@@ -575,7 +575,6 @@ def award_finetuning_achievement(config_path="config.json", verbose: bool = True
 
 
 
-
 START_DAY = '2025-05-12'
 print("확인: 인싸")
 award_inssa_achievement_from_date(START_DAY, config_path="config.json")

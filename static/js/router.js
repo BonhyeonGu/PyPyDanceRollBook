@@ -34,6 +34,12 @@ async function handleRouteChange() {
         break;
       }
 
+      case "#/analysis": {
+        const { renderAnalysisPage } = await import("/static/js/analysis.js");
+        await renderAnalysisPage(); // 내부에서 app.innerHTML 설정
+        break;
+      }
+
       default:
         app.innerHTML = `<div class="text-red-500 text-center mt-12">존재하지 않는 페이지입니다.</div>`;
     }

@@ -389,6 +389,94 @@ def get_achievements():
 
 
 
+@app.route("/api/attendance-interval-summary")
+def attendance_interval_summary():
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            # 1️⃣ 최근 30일 날짜 리스트 (어제까지)
+            end_date = datetime.now().date() - timedelta(days=1)
+            date_list = [end_date - timedelta(days=i) for i in range(30)]
+
+            # 2️⃣ 날짜별 분석 결과 누적용
+            segment_sums = [0] * 6
+            valid_days = 0
+
+            for d in date_list:
+                date_str = d.strftime("%Y-%m-%d")
+                cursor.execute("""
+                    SELECT enter_time FROM attendance
+                    WHERE DATE(enter_time) = %s
+                    ORDER BY enter_time ASC
+                """, (date_str,))
+                entries = cursor.fetchall()
+                if not entries:
+                    continue
+
+                # 3️⃣ 정규 시작시간 추정
+                first_entry = entries[0][0]
+                minute = first_entry.minute
+                rounded_min = 0 if minute < 15 else 30 if minute < 45 else 60
+                start_hour = first_entry.hour + (1 if rounded_min == 60 else 0)
+                start_min = 0 if rounded_min == 60 else rounded_min
+                start_time = datetime(d.year, d.month, d.day, start_hour, start_min)
+                end_time = start_time + timedelta(hours=1)
+
+                # 4️⃣ 6구간 정의 (10분 간격)
+                segments = [start_time + timedelta(minutes=10*i) for i in range(7)]
+
+                counts = [0] * 6
+                for row in entries:
+                    enter_time = row[0]
+                    if not (start_time <= enter_time < end_time):
+                        continue
+                    for i in range(6):
+                        if segments[i] <= enter_time < segments[i+1]:
+                            counts[i] += 1
+                            break
+
+                # 유효한 날만 누적
+                segment_sums = [s + c for s, c in zip(segment_sums, counts)]
+                valid_days += 1
+
+            if valid_days == 0:
+                return jsonify({"error": "No data found for last 30 days"}), 404
+
+            averages = [round(s / valid_days, 2) for s in segment_sums]
+            return jsonify({
+                "labels": ["0~10분", "10~20분", "20~30분", "30~40분", "40~50분", "50~60분"],
+                "averages": averages
+            })
+
+    finally:
+        conn.close()
+
+@app.route("/api/attendance-daily-count")
+def attendance_daily_count():
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            end_date = datetime.now().date() - timedelta(days=1)
+            start_date = end_date - timedelta(days=29)
+
+            cursor.execute("""
+                SELECT DATE(a.enter_time) AS date, COUNT(DISTINCT a.user_id) AS user_count
+                FROM attendance a
+                WHERE DATE(a.enter_time) BETWEEN %s AND %s
+                GROUP BY DATE(a.enter_time)
+                ORDER BY date ASC
+            """, (start_date, end_date))
+
+            rows = cursor.fetchall()
+            result = [
+                { "date": row[0].strftime("%Y-%m-%d"), "count": row[1] }
+                for row in rows
+            ]
+
+            return jsonify(result)
+    finally:
+        conn.close()
+
 
 @app.route("/")
 def serve_index():

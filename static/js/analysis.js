@@ -112,7 +112,7 @@ export async function renderAnalysisPage() {
                 <canvas id="dailyCountChart" width="400" height="320"></canvas>
             </div>
             <div class="flex flex-col items-center">
-                <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-white">출석 시간에 따른 인원비율 평균</h2>
+                <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-white">출석 시간에 따른 평균 인원비율</h2>
                 <canvas id="intervalChart" width="400" height="320"></canvas>
             </div>
         </div>

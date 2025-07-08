@@ -388,7 +388,6 @@ def get_achievements():
         conn.close()
 
 
-
 @app.route("/api/attendance-interval-summary")
 def attendance_interval_summary():
     conn = pymysql.connect(**DB_CONFIG)
@@ -399,7 +398,7 @@ def attendance_interval_summary():
             date_list = [end_date - timedelta(days=i) for i in range(30)]
 
             # 2️⃣ 날짜별 분석 결과 누적용
-            segment_sums = [0] * 6
+            segment_ratio_sums = [0.0] * 6
             valid_days = 0
 
             for d in date_list:
@@ -424,8 +423,8 @@ def attendance_interval_summary():
 
                 # 4️⃣ 6구간 정의 (10분 간격)
                 segments = [start_time + timedelta(minutes=10*i) for i in range(7)]
-
                 counts = [0] * 6
+
                 for row in entries:
                     enter_time = row[0]
                     if not (start_time <= enter_time < end_time):
@@ -435,17 +434,23 @@ def attendance_interval_summary():
                             counts[i] += 1
                             break
 
-                # 유효한 날만 누적
-                segment_sums = [s + c for s, c in zip(segment_sums, counts)]
+                total = sum(counts)
+                if total == 0:
+                    continue
+
+                ratios = [c / total for c in counts]
+                segment_ratio_sums = [s + r for s, r in zip(segment_ratio_sums, ratios)]
                 valid_days += 1
 
             if valid_days == 0:
                 return jsonify({"error": "No data found for last 30 days"}), 404
 
-            averages = [round(s / valid_days, 2) for s in segment_sums]
+            # 평균 비율 (%)로 환산
+            averages = [round(s / valid_days * 100, 2) for s in segment_ratio_sums]
+
             return jsonify({
                 "labels": ["0~10분", "10~20분", "20~30분", "30~40분", "40~50분", "50~60분"],
-                "averages": averages
+                "averages": averages  # 퍼센트 단위
             })
 
     finally:

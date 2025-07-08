@@ -112,7 +112,7 @@ export async function renderAnalysisPage() {
                 <canvas id="dailyCountChart" width="400" height="320"></canvas>
             </div>
             <div class="flex flex-col items-center">
-                <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-white">출석한 시간 범위 평균</h2>
+                <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-white">출석 시간에 따른 인원비율 평균</h2>
                 <canvas id="intervalChart" width="400" height="320"></canvas>
             </div>
         </div>
@@ -151,7 +151,7 @@ export async function renderAnalysisPage() {
         });
 
         drawLineChart("intervalChart", labels2, values2, isDark, {
-            label: "10분 단위 평균",
+            label: "출석 비율 (%)",
             fill: true,
             lineColor: isDark ? 'rgba(34,197,94,1)' : 'rgba(16,185,129,1)',
             pointBg: isDark ? 'rgba(34,197,94,0.2)' : 'rgba(16,185,129,0.2)',

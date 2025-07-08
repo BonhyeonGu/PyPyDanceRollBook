@@ -125,7 +125,7 @@ export async function renderAnalysisPage() {
         const isDark = document.documentElement.classList.contains("dark");
 
         drawLineChart("dailyCountChart", labels1, values1, isDark, {
-            label: "출석자 수",
+            label: "출석자 수 (명)",
             plugins: {
                 annotation: {
                     annotations: {

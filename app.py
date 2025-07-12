@@ -4,6 +4,8 @@ import os
 import json
 from datetime import date, datetime, timedelta
 import random
+from threading import Lock
+
 
 app = Flask(__name__)
 
@@ -13,21 +15,234 @@ with open("web_config.json", "r", encoding="utf-8") as f:
 DB_CONFIG = WEB_CONFIG["db"]
 PROFILE_IMG_DIR = WEB_CONFIG["profile_img_dir"]
 
-def get_top_attendees(limit=10):
+#---------------------------------------------------------------------------------------
+
+cache_store = {
+    "ranking_users": {
+        "total": [],
+        "weekly": [],
+        "monthly": []
+    },
+    "popular_music": [],
+    "all_users": [],
+    "achievements": [],
+
+    "attendance_interval_summary": {},
+    "attendance_daily_count": [],
+    "weekday_attendance_summary": {}
+}
+cache_lock = Lock()
+
+@app.route("/api/refresh-stats")
+def refresh_stats():
+    updated = {}
+
+    with cache_lock:
+        # 랭킹 유저 캐시 갱신
+        for mode in ["total", "weekly", "monthly"]:
+            cache_store["ranking_users"][mode] = compute_ranking(mode)
+        updated["ranking_users"] = {k: len(v) for k, v in cache_store["ranking_users"].items()}
+
+        # all_users 캐시 갱신
+        cache_store["all_users"] = compute_all_users()
+        updated["all_users"] = len(cache_store["all_users"])
+
+        # 업적
+        cache_store["achievements"] = compute_achievements()
+        updated["achievements"] = len(cache_store["achievements"])
+
+        # 인기 음악
+        cache_store["popular_music"] = compute_popular_music()
+        updated["popular_music"] = len(cache_store["popular_music"])
+
+        # 출석 간격 통계
+        summary = compute_attendance_interval_summary()
+        cache_store["attendance_interval_summary"] = summary or {}
+        updated["attendance_interval_summary"] = bool(summary)
+
+        # 출석 일별 카운트
+        cache_store["attendance_daily_count"] = compute_attendance_daily_count()
+        updated["attendance_daily_count"] = len(cache_store["attendance_daily_count"])
+
+        
+        # 요일별 출석 통계
+        summary = compute_weekday_attendance_summary()
+        cache_store["weekday_attendance_summary"] = summary or {}
+        updated["weekday_attendance_summary"] = bool(summary)
+
+
+    return jsonify({"status": "refreshed", "updated": updated})
+
+#---------------------------------------------------------------------------------------
+
+def compute_ranking(mode: str):
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            today = datetime.today()
+
+            if mode == "weekly":
+                start_of_week = today - timedelta(days=today.weekday())  # 월요일
+                start_str = start_of_week.strftime("%Y-%m-%d 00:00:00")
+                end_str = today.strftime("%Y-%m-%d 23:59:59")
+
+                cursor.execute("""
+                    SELECT u.nickname, COUNT(*) AS count
+                    FROM attendance a
+                    JOIN users u ON u.user_id = a.user_id
+                    WHERE a.enter_time BETWEEN %s AND %s
+                    GROUP BY u.user_id
+                    ORDER BY count DESC
+                    LIMIT 10
+                """, (start_str, end_str))
+
+            elif mode == "monthly":
+                start_of_month = today.replace(day=1)
+                start_str = start_of_month.strftime("%Y-%m-%d 00:00:00")
+                end_str = today.strftime("%Y-%m-%d 23:59:59")
+
+                cursor.execute("""
+                    SELECT u.nickname, COUNT(*) AS count
+                    FROM attendance a
+                    JOIN users u ON u.user_id = a.user_id
+                    WHERE a.enter_time BETWEEN %s AND %s
+                    GROUP BY u.user_id
+                    ORDER BY count DESC
+                    LIMIT 10
+                """, (start_str, end_str))
+
+            else:  # total
+                cursor.execute("""
+                    SELECT u.nickname, uas.total_count
+                    FROM user_attendance_summary uas
+                    JOIN users u ON u.user_id = uas.user_id
+                    ORDER BY uas.total_count DESC, uas.last_attended DESC
+                    LIMIT 10
+                """)
+
+            rows = cursor.fetchall()
+
+            users = []
+            for rank, row in enumerate(rows, start=1):
+                nickname = row[0]
+                count = row[1] if len(row) > 1 else None
+                info = get_user_info_by_nickname(cursor, nickname)
+                if info:
+                    info["rank"] = rank
+                    if count is not None:
+                        info["total_count"] = count
+                    users.append(info)
+
+            return users
+    finally:
+        conn.close()
+
+@app.route("/api/ranking-users")
+def ranking_users():
+    mode = request.args.get("mode", "total")
+    with cache_lock:
+        return jsonify(cache_store["ranking_users"].get(mode, []))
+
+
+def update_ranking_users_cache():
+    with cache_lock:
+        for mode in ["total", "weekly", "monthly"]:
+            cache_store["ranking_users"][mode] = compute_ranking(mode)
+
+#---------------------------------------------------------------------------------------
+
+def compute_popular_music():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT u.nickname, u.comment, uas.total_count, uas.last_attended
-                FROM user_attendance_summary uas
-                JOIN users u ON u.user_id = uas.user_id
-                ORDER BY uas.total_count DESC, uas.last_attended DESC
-                LIMIT %s
-            """, (limit,))
-            result = cursor.fetchall()
-            return result
+                SELECT title, COUNT(*) AS play_count
+                FROM music_play
+                WHERE played_at >= NOW() - INTERVAL 7 DAY
+                GROUP BY title
+                ORDER BY play_count DESC, MAX(played_at) DESC
+                LIMIT 10
+            """)
+            rows = cursor.fetchall()
+            return [
+                { "title": r[0], "count": r[1] }
+                for r in rows
+            ]
     finally:
         conn.close()
+
+@app.route("/api/popular-music")
+def popular_music():
+    with cache_lock:
+        return jsonify(cache_store["popular_music"])
+
+
+#---------------------------------------------------------------------------------------
+
+
+def compute_all_users():
+    exclude_list = ["아짱나", "미쿠"]
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            placeholders = ', '.join(['%s'] * len(exclude_list))
+            query = f"SELECT nickname FROM users WHERE nickname NOT IN ({placeholders}) ORDER BY user_id ASC"
+            cursor.execute(query, exclude_list)
+
+            nicknames = [row[0] for row in cursor.fetchall()]
+
+            users = []
+            for nickname in nicknames:
+                info = get_user_info_by_nickname(cursor, nickname)
+                if info:
+                    users.append(info)
+            return users
+    finally:
+        conn.close()
+
+#Page All Users
+@app.route("/api/all-users")
+def all_users():
+    with cache_lock:
+        cached_users = cache_store["all_users"][:]
+    random.shuffle(cached_users)
+    return jsonify(cached_users)
+
+#---------------------------------------------------------------------------------------
+
+def compute_achievements():
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT a.name, a.description,
+                       COUNT(ua.user_id) AS achieved_count,
+                       (SELECT COUNT(*) FROM users) AS total_users
+                FROM achievements a
+                LEFT JOIN user_achievements ua ON ua.achievement_id = a.achievement_id
+                GROUP BY a.achievement_id, a.name, a.description
+                ORDER BY a.name ASC
+            """)
+            rows = cursor.fetchall()
+            return [
+                {
+                    "name": row[0],
+                    "description": row[1],
+                    "achieved_count": row[2],
+                    "total_users": row[3],
+                    "percentage": round(row[2] / row[3] * 100, 1) if row[3] else 0
+                }
+                for row in rows
+            ]
+    finally:
+        conn.close()
+
+@app.route("/api/achievements")
+def get_achievements():
+    with cache_lock:
+        return jsonify(cache_store["achievements"])
+
+#---------------------------------------------------------------------------------------
 
 @app.route("/api/date/participants")
 def participants_by_date():
@@ -104,26 +319,160 @@ def music_by_date():
     finally:
         conn.close()
 
-@app.route("/api/popular-music")
-def popular_music():
+#---------------------------------------------------------------------------------------
+
+DAYRANGE = 60 #최근 60일
+
+def compute_attendance_interval_summary():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT title, COUNT(*) AS play_count
-                FROM music_play
-                WHERE played_at >= NOW() - INTERVAL 7 DAY
-                GROUP BY title
-                ORDER BY play_count DESC, MAX(played_at) DESC
-                LIMIT 10
-            """)
-            rows = cursor.fetchall()
-            return jsonify([
-                { "title": r[0], "count": r[1] }
-                for r in rows
-            ])
+            end_date = datetime.now().date() - timedelta(days=1)
+            date_list = [end_date - timedelta(days=i) for i in range(DAYRANGE)]
+
+            segment_ratio_sums = [0.0] * 6
+            valid_days = 0
+
+            for d in date_list:
+                date_str = d.strftime("%Y-%m-%d")
+                cursor.execute("""
+                    SELECT enter_time FROM attendance
+                    WHERE DATE(enter_time) = %s
+                    ORDER BY enter_time ASC
+                """, (date_str,))
+                entries = cursor.fetchall()
+                if not entries:
+                    continue
+
+                first_entry = entries[0][0]
+                minute = first_entry.minute
+                rounded_min = 0 if minute < 15 else 30 if minute < 45 else 60
+                start_hour = first_entry.hour + (1 if rounded_min == 60 else 0)
+                start_min = 0 if rounded_min == 60 else rounded_min
+                start_time = datetime(d.year, d.month, d.day, start_hour, start_min)
+                end_time = start_time + timedelta(hours=1)
+
+                segments = [start_time + timedelta(minutes=10*i) for i in range(7)]
+                counts = [0] * 6
+
+                for row in entries:
+                    enter_time = row[0]
+                    if not (start_time <= enter_time < end_time):
+                        continue
+                    for i in range(6):
+                        if segments[i] <= enter_time < segments[i+1]:
+                            counts[i] += 1
+                            break
+
+                total = sum(counts)
+                if total == 0:
+                    continue
+
+                ratios = [c / total for c in counts]
+                segment_ratio_sums = [s + r for s, r in zip(segment_ratio_sums, ratios)]
+                valid_days += 1
+
+            if valid_days == 0:
+                return None
+
+            averages = [round(s / valid_days * 100, 2) for s in segment_ratio_sums]
+
+            return {
+                "labels": ["0~10분", "10~20분", "20~30분", "30~40분", "40~50분", "50~60분"],
+                "averages": averages
+            }
+
     finally:
         conn.close()
+
+@app.route("/api/attendance-interval-summary")
+def attendance_interval_summary():
+    with cache_lock:
+        summary = cache_store["attendance_interval_summary"]
+    if not summary:
+        return jsonify({"error": "No data found for last 30 days"}), 404
+    return jsonify(summary)
+
+#---------------------------------------------------------------------------------------
+
+def compute_attendance_daily_count():
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            end_date = datetime.now().date() - timedelta(days=1)
+            start_date = end_date - timedelta(days=(DAYRANGE-1))
+
+            cursor.execute("""
+                SELECT DATE(a.enter_time) AS date, COUNT(DISTINCT a.user_id) AS user_count
+                FROM attendance a
+                WHERE DATE(a.enter_time) BETWEEN %s AND %s
+                GROUP BY DATE(a.enter_time)
+                ORDER BY date ASC
+            """, (start_date, end_date))
+
+            rows = cursor.fetchall()
+            return [
+                { "date": row[0].strftime("%Y-%m-%d"), "count": row[1] }
+                for row in rows
+            ]
+    finally:
+        conn.close()
+
+@app.route("/api/attendance-daily-count")
+def attendance_daily_count():
+    with cache_lock:
+        return jsonify(cache_store["attendance_daily_count"])
+
+
+#---------------------------------------------------------------------------------------
+
+def compute_weekday_attendance_summary():
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            end_date = datetime.now().date() - timedelta(days=1)
+            date_list = [end_date - timedelta(days=i) for i in range(DAYRANGE)]
+
+            weekday_counts = [0] * 7  # 월 ~ 일
+            weekday_days = [0] * 7
+
+            for d in date_list:
+                weekday = d.weekday()
+                date_str = d.strftime("%Y-%m-%d")
+
+                cursor.execute("""
+                    SELECT COUNT(*) FROM attendance
+                    WHERE DATE(enter_time) = %s
+                """, (date_str,))
+                count = cursor.fetchone()[0]
+
+                weekday_counts[weekday] += count
+                weekday_days[weekday] += 1
+
+            averages = [
+                round(count / days, 2) if days > 0 else 0.0
+                for count, days in zip(weekday_counts, weekday_days)
+            ]
+
+            return {
+                "labels": ["월", "화", "수", "목", "금", "토", "일"],
+                "averages": averages
+            }
+    finally:
+        conn.close()
+
+
+@app.route("/api/weekday-attendance-summary")
+def weekday_attendance_summary():
+    with cache_lock:
+        summary = cache_store["weekday_attendance_summary"]
+    if not summary:
+        return jsonify({"error": "No data available"}), 404
+    return jsonify(summary)
+
+
+#---------------------------------------------------------------------------------------
+
 
 def get_user_info_by_nickname(cursor, nickname):
     cursor.execute("""
@@ -222,73 +571,6 @@ def user_details():
     finally:
         conn.close()
 
-@app.route("/api/ranking-users")
-def ranking_users():
-    mode = request.args.get("mode", "total")
-
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        with conn.cursor() as cursor:
-            if mode == "weekly":
-                today = datetime.today()
-                start_of_week = today - timedelta(days=today.weekday())  # 월요일
-                start_str = start_of_week.strftime("%Y-%m-%d 00:00:00")
-                end_str = today.strftime("%Y-%m-%d 23:59:59")
-
-                cursor.execute("""
-                    SELECT u.nickname, COUNT(*) AS count
-                    FROM attendance a
-                    JOIN users u ON u.user_id = a.user_id
-                    WHERE a.enter_time BETWEEN %s AND %s
-                    GROUP BY u.user_id
-                    ORDER BY count DESC
-                    LIMIT 10
-                """, (start_str, end_str))
-
-            elif mode == "monthly":
-                today = datetime.today()
-                start_of_month = today.replace(day=1)
-                start_str = start_of_month.strftime("%Y-%m-%d 00:00:00")
-                end_str = today.strftime("%Y-%m-%d 23:59:59")
-
-                cursor.execute("""
-                    SELECT u.nickname, COUNT(*) AS count
-                    FROM attendance a
-                    JOIN users u ON u.user_id = a.user_id
-                    WHERE a.enter_time BETWEEN %s AND %s
-                    GROUP BY u.user_id
-                    ORDER BY count DESC
-                    LIMIT 10
-                """, (start_str, end_str))
-
-            else:  # total
-                cursor.execute("""
-                    SELECT u.nickname
-                    FROM user_attendance_summary uas
-                    JOIN users u ON u.user_id = uas.user_id
-                    ORDER BY uas.total_count DESC, uas.last_attended DESC
-                    LIMIT 10
-                """)
-
-            rows = cursor.fetchall()
-            nicknames = [row[0] for row in rows]
-
-            users = []
-            for rank, row in enumerate(rows, start=1):
-                nickname = row[0]
-                count = row[1] if len(row) > 1 else None
-                info = get_user_info_by_nickname(cursor, nickname)
-                if info:
-                    info["rank"] = rank
-                    if count is not None:
-                        info["total_count"] = count  # ⭐ 주간/월간 출석 수
-                    users.append(info)
-
-            return jsonify(users)
-
-    finally:
-        conn.close()
-
         
 @app.route("/api/random-users")
 def random_users():
@@ -334,62 +616,7 @@ def random_users():
     finally:
         conn.close()
 
-@app.route("/api/all-users")
-def all_users():
-    exclude_list = ["아짱나", "미쿠"]  # 제외할 닉네임들
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        with conn.cursor() as cursor:
-            # 플레이스홀더 생성 (e.g. %s, %s, %s)
-            placeholders = ', '.join(['%s'] * len(exclude_list))
-            query = f"SELECT nickname FROM users WHERE nickname NOT IN ({placeholders}) ORDER BY user_id ASC"
-            cursor.execute(query, exclude_list)
 
-            nicknames = [row[0] for row in cursor.fetchall()]
-            random.shuffle(nicknames)
-
-            users = []
-            for nickname in nicknames:
-                info = get_user_info_by_nickname(cursor, nickname)
-                if info:
-                    users.append(info)
-
-            return jsonify(users)
-    finally:
-        conn.close()
-
-
-@app.route("/api/achievements")
-def get_achievements():
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT a.name, a.description,
-                       COUNT(ua.user_id) AS achieved_count,
-                       (SELECT COUNT(*) FROM users) AS total_users
-                FROM achievements a
-                LEFT JOIN user_achievements ua ON ua.achievement_id = a.achievement_id
-                GROUP BY a.achievement_id, a.name, a.description
-                ORDER BY a.name ASC
-            """)
-            rows = cursor.fetchall()
-            return jsonify([
-                {
-                    "name": row[0],
-                    "description": row[1],
-                    "achieved_count": row[2],
-                    "total_users": row[3],
-                    "percentage": round(row[2] / row[3] * 100, 1) if row[3] else 0
-                }
-                for row in rows
-            ])
-    finally:
-        conn.close()
-
-
-@app.route("/api/attendance-interval-summary")
-def attendance_interval_summary():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
@@ -453,32 +680,6 @@ def attendance_interval_summary():
                 "averages": averages  # 퍼센트 단위
             })
 
-    finally:
-        conn.close()
-
-@app.route("/api/attendance-daily-count")
-def attendance_daily_count():
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        with conn.cursor() as cursor:
-            end_date = datetime.now().date() - timedelta(days=1)
-            start_date = end_date - timedelta(days=29)
-
-            cursor.execute("""
-                SELECT DATE(a.enter_time) AS date, COUNT(DISTINCT a.user_id) AS user_count
-                FROM attendance a
-                WHERE DATE(a.enter_time) BETWEEN %s AND %s
-                GROUP BY DATE(a.enter_time)
-                ORDER BY date ASC
-            """, (start_date, end_date))
-
-            rows = cursor.fetchall()
-            result = [
-                { "date": row[0].strftime("%Y-%m-%d"), "count": row[1] }
-                for row in rows
-            ]
-
-            return jsonify(result)
     finally:
         conn.close()
 

@@ -97,6 +97,64 @@ function drawLineChart(canvasId, labels, data, isDark, options = {}) {
     chartInstances[canvasId] = chart;
 }
 
+function drawBarChart(canvasId, labels, data, isDark) {
+    const barColor = isDark ? 'rgba(96,165,250,0.8)' : 'rgba(54,162,235,0.8)';
+    const borderColor = isDark ? 'rgba(96,165,250,1)' : 'rgba(54,162,235,1)';
+    const gridColor = isDark ? '#444' : '#ccc';
+    const fontColor = isDark ? '#ddd' : '#333';
+
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+
+    if (chartInstances[canvasId]) {
+        chartInstances[canvasId].destroy();
+    }
+
+    const chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: "평균 출석 횟수",
+                data: data,
+                backgroundColor: barColor,
+                borderColor: borderColor,
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    labels: {
+                        color: fontColor
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: context => `${context.parsed.y} 회`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: fontColor },
+                    grid: { color: gridColor }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: fontColor },
+                    grid: { color: gridColor }
+                }
+            }
+        }
+    });
+
+    chartInstances[canvasId] = chart;
+}
+
+
 export async function renderAnalysisPage() {
     const app = document.getElementById("app");
     if (!app) return;
@@ -104,12 +162,16 @@ export async function renderAnalysisPage() {
     app.innerHTML = `
         <h1 class="text-2xl font-bold mb-6">분석</h1>
         <div class="text-sm text-gray-600 dark:text-gray-300 mb-8">
-            최근 30일 동안의 데이터를 분석합니다.
+            최근 60일 동안의 데이터를 분석합니다.
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start justify-center">
             <div class="flex flex-col items-center">
                 <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-white">날짜별 출석 유저 수</h2>
                 <canvas id="dailyCountChart" width="400" height="320"></canvas>
+            </div>
+            <div class="flex flex-col items-center">
+                <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-white">요일별 평균 출석 횟수</h2>
+                <canvas id="weekdayChart" width="400" height="320"></canvas>
             </div>
             <div class="flex flex-col items-center">
                 <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-white">출석 시간에 따른 평균 인원비율</h2>
@@ -120,6 +182,7 @@ export async function renderAnalysisPage() {
 
     let labels1 = [], values1 = [], avg = 0;
     let labels2 = [], values2 = [];
+    let labels3 = [], values3 = [];
 
     async function loadAndDrawCharts() {
         const isDark = document.documentElement.classList.contains("dark");
@@ -157,6 +220,8 @@ export async function renderAnalysisPage() {
             pointBg: isDark ? 'rgba(34,197,94,0.2)' : 'rgba(16,185,129,0.2)',
             showLegend: false
         });
+
+        drawBarChart("weekdayChart", labels3, values3, isDark);
     }
 
     try {
@@ -179,6 +244,15 @@ export async function renderAnalysisPage() {
         values2 = data2.averages;
     } catch (e) {
         console.error("10분 단위 오류:", e);
+    }
+
+    try {
+        const res3 = await fetch("/api/weekday-attendance-summary");
+        const data3 = await res3.json();
+        labels3 = data3.labels;
+        values3 = data3.averages;
+    } catch (e) {
+        console.error("요일별 출석 오류:", e);
     }
 
     // 초기 그리기

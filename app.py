@@ -487,8 +487,8 @@ def weekday_attendance_summary():
 
 #---------------------------------------------------------------------------------------
 MIN_EDGE_WEIGHT = 5
-LOVE_A = 1.0
-LOVE_B = 200.0
+LOVE_A = 3.0
+LOVE_B = 30.0
 DECAY = 0.98        # 10분마다 decay
 EXCLUDED_NICKNAMES = {"아짱나", "미쿠", "Nine_Bones"}
 SLOT_MINUTES = 10

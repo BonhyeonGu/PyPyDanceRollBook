@@ -6,6 +6,8 @@ from datetime import date, datetime, timedelta
 import random
 from threading import Lock
 
+from collections import defaultdict
+
 
 app = Flask(__name__)
 
@@ -29,7 +31,12 @@ cache_store = {
 
     "attendance_interval_summary": {},
     "attendance_daily_count": [],
-    "weekday_attendance_summary": {}
+    "weekday_attendance_summary": {},
+
+    "love_graph": {
+        "nodes": [],
+        "links": []
+    }
 }
 cache_lock = Lock()
 
@@ -69,6 +76,13 @@ def refresh_stats():
         summary = compute_weekday_attendance_summary()
         cache_store["weekday_attendance_summary"] = summary or {}
         updated["weekday_attendance_summary"] = bool(summary)
+
+        # love_graph 캐시 갱신
+        cache_store["love_graph"] = compute_love_graph()
+        updated["love_graph"] = {
+            "nodes": len(cache_store["love_graph"]["nodes"]),
+            "links": len(cache_store["love_graph"]["links"])
+        }
 
 
     return jsonify({"status": "refreshed", "updated": updated})
@@ -472,6 +486,120 @@ def weekday_attendance_summary():
 
 
 #---------------------------------------------------------------------------------------
+MIN_EDGE_WEIGHT = 5
+LOVE_A = 1.0
+LOVE_B = 200.0
+DECAY = 0.98        # 10분마다 decay
+EXCLUDED_NICKNAMES = {"아짱나", "미쿠", "Nine_Bones"}
+SLOT_MINUTES = 10
+LOVE_HIGHLIGHT_MAX = 3 
+
+def compute_love_graph():
+    end_date = datetime.now().date() - timedelta(days=1)
+    start_date = end_date - timedelta(days=DAYRANGE - 1)
+    conn = pymysql.connect(**DB_CONFIG)
+
+    try:
+        with conn.cursor() as cursor:
+            # 유저 매핑
+            cursor.execute("SELECT user_id, nickname FROM users")
+            users = cursor.fetchall()
+            id_to_nick = {uid: nick for uid, nick in users if nick not in EXCLUDED_NICKNAMES}
+            valid_user_ids = set(id_to_nick.keys())
+
+            # 전체 출석 데이터 불러오기 (메모리에 저장)
+            cursor.execute("""
+                SELECT user_id, enter_time, leave_time
+                FROM attendance
+                WHERE DATE(enter_time) BETWEEN %s AND %s
+                  AND user_id IN (%s)
+            """ % ("%s", "%s", ",".join(["%s"] * len(valid_user_ids))),
+            [start_date, end_date] + list(valid_user_ids))
+            all_rows = cursor.fetchall()
+
+            # 사용자별 출석 리스트
+            user_sessions = defaultdict(list)
+            for uid, enter, leave in all_rows:
+                user_sessions[uid].append((enter, leave))
+
+            scores = {}
+            uid_list = list(valid_user_ids)
+            all_pairs = [tuple(sorted((uid1, uid2))) for i, uid1 in enumerate(uid_list) for uid2 in uid_list[i+1:]]
+
+            for d in range(DAYRANGE):
+                day = start_date + timedelta(days=d)
+                for slot in range(0, 144):
+                    slot_start = datetime.combine(day, datetime.min.time()) + timedelta(minutes=slot*SLOT_MINUTES)
+                    slot_end = slot_start + timedelta(minutes=SLOT_MINUTES)
+
+                    present = set()
+                    for uid, sessions in user_sessions.items():
+                        for ent, lev in sessions:
+                            if ent < slot_end and lev > slot_start:
+                                present.add(uid)
+                                break
+
+                    present = present & valid_user_ids
+                    present_list = list(present)
+
+                    for i in range(len(present_list)):
+                        uid1 = present_list[i]
+                        for j in range(i+1, len(present_list)):
+                            uid2 = present_list[j]
+                            key = (uid1, uid2)
+                            scores[key] = scores.get(key, 0.0) * DECAY + LOVE_A
+
+                    for key in all_pairs:
+                        uid1, uid2 = key
+                        in1 = uid1 in present
+                        in2 = uid2 in present
+                        if in1 != in2:
+                            scores[key] = scores.get(key, 0.0) * DECAY - LOVE_B
+                        elif not in1 and not in2:
+                            scores[key] = scores.get(key, 0.0) * DECAY
+
+            # 하이라이트 엣지 선정
+            # 전체 간선 중 weight 높은 순으로 상위 N개 선택
+            edge_weights = [
+                (tuple(sorted((uid1, uid2))), weight)
+                for (uid1, uid2), weight in scores.items()
+                if weight > MIN_EDGE_WEIGHT
+            ]
+
+            edge_weights.sort(key=lambda x: -x[1])  # 내림차순 정렬
+
+            highlight_edges = set(edge_key for edge_key, _ in edge_weights[:LOVE_HIGHLIGHT_MAX])
+
+            # 링크 및 노드 구성
+            links = []
+            connected_nicks = set()
+            for (uid1, uid2), weight in scores.items():
+                if weight > MIN_EDGE_WEIGHT:
+                    nick1 = id_to_nick.get(uid1)
+                    nick2 = id_to_nick.get(uid2)
+                    if not nick1 or not nick2:
+                        continue
+                    key = (uid1, uid2) if uid1 < uid2 else (uid2, uid1)
+                    links.append({
+                        "source": nick1,
+                        "target": nick2,
+                        "weight": weight,
+                        "highlight": key in highlight_edges  # ✅ 하이라이트 여부 포함
+                    })
+                    connected_nicks.update([nick1, nick2])
+
+            nodes = [{"id": nick, "nickname": nick} for nick in connected_nicks]
+            return {"nodes": nodes, "links": links}
+
+    finally:
+        conn.close()
+
+@app.route("/api/love-graph")
+def love_graph():
+    with cache_lock:
+        return jsonify(cache_store["love_graph"])
+
+#---------------------------------------------------------------------------------------
 
 
 def get_user_info_by_nickname(cursor, nickname):
@@ -691,3 +819,4 @@ def serve_index():
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', debug=True)
+    #app.run(debug=True, port=5001)

@@ -154,6 +154,67 @@ function drawBarChart(canvasId, labels, data, isDark) {
     chartInstances[canvasId] = chart;
 }
 
+function drawLoveGraph(elements, isDark) {
+    const container = document.getElementById('loveGraph');
+    if (!container) return;
+
+    container.innerHTML = ''; // 기존 그래프 제거
+
+    cytoscape({
+        container: container,
+        elements: elements,
+        layout: {
+            name: 'cose', // 자동 레이아웃
+            padding: 20
+        },
+        style: [
+            {
+                selector: 'node',
+                style: {
+                    'label': 'data(label)',
+                    'background-color': isDark ? '#60a5fa' : '#3b82f6',
+                    'color': isDark ? '#fff' : '#111',
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'font-size': 6,    // 글자 크기
+                    'width': 40,       // 노드 크기
+                    'height': 40
+                }
+            },
+            {
+                selector: 'edge', // 기본 엣지 (라벨 추가됨!)
+                style: {
+                    'width': 1,
+                    'line-color': isDark ? '#aaa' : '#ccc',
+                    'curve-style': 'bezier',
+                    'label': 'data(label)',  // ✅ 추가됨
+                    'font-size': 8,
+                    'text-background-color': isDark ? '#333' : '#eee',
+                    'text-background-opacity': 1,
+                    'text-background-padding': 2,
+                    'text-margin-y': -4,
+                    'color': isDark ? '#fff' : '#000',
+                    'text-rotation': 'autorotate'
+                }
+            },
+            {
+                selector: 'edge.highlight', // 강조된 간선
+                style: {
+                    'width': 3,
+                    'line-color': isDark ? '#f87171' : '#dc2626',
+                    'label': 'data(label)',
+                    'font-size': 8,
+                    'text-background-color': isDark ? '#333' : '#eee',
+                    'text-background-opacity': 1,
+                    'text-background-padding': 2,
+                    'text-margin-y': -4,
+                    'color': isDark ? '#fff' : '#000',
+                    'text-rotation': 'autorotate'
+                }
+            }
+        ]
+    });
+}
 
 export async function renderAnalysisPage() {
     const app = document.getElementById("app");
@@ -165,6 +226,10 @@ export async function renderAnalysisPage() {
             최근 60일 동안의 데이터를 분석합니다.
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start justify-center">
+            <div class="flex flex-col items-center col-span-1 md:col-span-2">
+                <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-white">참여자 친밀도 추정</h2>
+                <div id="loveGraph" class="w-full h-[500px] bg-white dark:bg-zinc-900 rounded-xl shadow-inner border border-gray-300 dark:border-zinc-700"></div>
+            </div>
             <div class="flex flex-col items-center">
                 <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-white">날짜별 출석 유저 수</h2>
                 <canvas id="dailyCountChart" width="400" height="320"></canvas>
@@ -183,6 +248,7 @@ export async function renderAnalysisPage() {
     let labels1 = [], values1 = [], avg = 0;
     let labels2 = [], values2 = [];
     let labels3 = [], values3 = [];
+    let loveElements = [];
 
     async function loadAndDrawCharts() {
         const isDark = document.documentElement.classList.contains("dark");
@@ -222,6 +288,8 @@ export async function renderAnalysisPage() {
         });
 
         drawBarChart("weekdayChart", labels3, values3, isDark);
+
+        drawLoveGraph(loveElements, isDark);
     }
 
     try {
@@ -255,6 +323,31 @@ export async function renderAnalysisPage() {
         console.error("요일별 출석 오류:", e);
     }
 
+    try {
+        const res = await fetch("/api/love-graph");
+        const data = await res.json();
+        loveElements = [
+            ...data.nodes.map(n => ({
+                data: { id: n.id, label: n.nickname }
+            })),
+            ...data.links.map(e => ({
+                data: {
+                    id: `${e.source}__${e.target}`,
+                    source: e.source,
+                    target: e.target,
+                    weight: e.weight,
+                    label: `${Math.round(e.weight)}`
+
+                },
+                classes: e.highlight ? 'highlight' : ''
+            }))
+        ];
+    } catch (e) {
+        console.error("친밀도 그래프 오류:", e);
+    }
+
+    
+
     // 초기 그리기
     loadAndDrawCharts();
 
@@ -262,5 +355,7 @@ export async function renderAnalysisPage() {
     const observer = new MutationObserver(() => {
         loadAndDrawCharts();
     });
+
+
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 }

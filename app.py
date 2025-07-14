@@ -506,8 +506,8 @@ EXCLUDED_NICKNAMES = {"아짱나", "미쿠", "Nine_Bones"}
 LOVE_HIGHLIGHT_MAX = 5
 
 def compute_love_graph():
-    SLOTS_PER_DAY = (60 * 24) // SLOT_MINUTES  # 288
-    TOTAL_SLOTS = SLOTS_PER_DAY * 2 * DAYRANGE  # offset 포함
+    SLOTS_PER_DAY = (60 * 24) // SLOT_MINUTES
+    TOTAL_SLOTS = SLOTS_PER_DAY * 2 * DAYRANGE
 
     end_date = datetime.now().date() - timedelta(days=1)
     start_date = end_date - timedelta(days=DAYRANGE - 1)
@@ -553,15 +553,15 @@ def compute_love_graph():
                             if ent < offset_end and lev > offset_start:
                                 user_vectors[uid][base_idx + 1] = 1
 
-            # 🔸 슬롯 유사도 행렬 S 생성: 가까운 슬롯은 1, 멀수록 감소 (가우시안 감쇠)
+            # 슬롯 유사도 행렬
             slot_sim = np.zeros((TOTAL_SLOTS, TOTAL_SLOTS), dtype=np.float32)
-            decay_sigma = 1.5  # 시간 간격 감쇠율 조정
+            decay_sigma = 1.5
             for i in range(TOTAL_SLOTS):
                 for j in range(TOTAL_SLOTS):
                     dist = abs(i - j)
                     slot_sim[i, j] = math.exp(- (dist ** 2) / (2 * (decay_sigma ** 2)))
 
-            # 🔸 Soft Cosine 유사도 계산
+            # Soft Cosine 유사도 계산
             uid_list = list(valid_user_ids)
             scores = {}
             for i in range(len(uid_list)):
@@ -575,32 +575,35 @@ def compute_love_graph():
                     score = numerator / (math.sqrt(denom1) * math.sqrt(denom2)) if denom1 > 0 and denom2 > 0 else 0.0
                     scores[(uid1, uid2)] = score
 
-            # 🔸 간선 정리
-            links = []
-            connected_nicks = set()
+            # 간선 정리
             edge_nick_weights = []
+            max_edge_per_nick = defaultdict(float)  # 닉네임별 최대 가중치 저장
 
             for (uid1, uid2), weight in scores.items():
-                if weight >= MIN_EDGE_WEIGHT:
-                    nick1 = id_to_nick.get(uid1)
-                    nick2 = id_to_nick.get(uid2)
-                    if not nick1 or not nick2:
-                        continue
-                    nick_key = tuple(sorted((nick1, nick2)))
-                    edge_nick_weights.append((nick_key, weight))
+                if weight < MIN_EDGE_WEIGHT:
+                    continue
+                nick1 = id_to_nick.get(uid1)
+                nick2 = id_to_nick.get(uid2)
+                if not nick1 or not nick2:
+                    continue
+                nick_key = tuple(sorted((nick1, nick2)))
+                edge_nick_weights.append((nick_key, weight))
+                max_edge_per_nick[nick1] = max(max_edge_per_nick[nick1], weight)
+                max_edge_per_nick[nick2] = max(max_edge_per_nick[nick2], weight)
 
-            edge_nick_weights.sort(key=lambda x: -x[1])
-            highlight_keys = set(k for k, _ in edge_nick_weights[:LOVE_HIGHLIGHT_MAX])
-
-            for nick_key, weight in edge_nick_weights:
+            links = []
+            connected_nicks = set()
+            for (nick1, nick2), weight in edge_nick_weights:
+                highlight = (weight == max_edge_per_nick[nick1]) and (weight == max_edge_per_nick[nick2])
                 links.append({
-                    "source": nick_key[0],
-                    "target": nick_key[1],
+                    "source": nick1,
+                    "target": nick2,
                     "weight": weight,
-                    "highlight": nick_key in highlight_keys
+                    "highlight": highlight
                 })
-                connected_nicks.update(nick_key)
+                connected_nicks.update([nick1, nick2])
 
+            # 노드 목록
             nodes = []
             for nick in sorted(connected_nicks):
                 img_filename = f"{nick}.png"
@@ -617,7 +620,6 @@ def compute_love_graph():
 
     finally:
         conn.close()
-
 
 @app.route("/api/love-graph")
 def love_graph():

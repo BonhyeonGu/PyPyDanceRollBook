@@ -487,11 +487,12 @@ def weekday_attendance_summary():
 
 #---------------------------------------------------------------------------------------
 MIN_EDGE_WEIGHT = 5
-LOVE_A = 3.0
-LOVE_B = 30.0
-DECAY = 0.98        # 10분마다 decay
-EXCLUDED_NICKNAMES = {"아짱나", "미쿠", "Nine_Bones"}
+LOVE_A = 2.0
+LOVE_B = 5.0
+LOVE_MISSING_BOOST = 15.0
 SLOT_MINUTES = 10
+DECAY = 0.98       # 10분마다 decay
+EXCLUDED_NICKNAMES = {"아짱나", "미쿠", "Nine_Bones"}
 LOVE_HIGHLIGHT_MAX = 3 
 
 def compute_love_graph():
@@ -507,7 +508,7 @@ def compute_love_graph():
             id_to_nick = {uid: nick for uid, nick in users if nick not in EXCLUDED_NICKNAMES}
             valid_user_ids = set(id_to_nick.keys())
 
-            # 전체 출석 데이터 불러오기 (메모리에 저장)
+            # 출석 정보
             cursor.execute("""
                 SELECT user_id, enter_time, leave_time
                 FROM attendance
@@ -517,7 +518,7 @@ def compute_love_graph():
             [start_date, end_date] + list(valid_user_ids))
             all_rows = cursor.fetchall()
 
-            # 사용자별 출석 리스트
+            # 세션 구성
             user_sessions = defaultdict(list)
             for uid, enter, leave in all_rows:
                 user_sessions[uid].append((enter, leave))
@@ -525,13 +526,15 @@ def compute_love_graph():
             scores = {}
             uid_list = list(valid_user_ids)
             all_pairs = [tuple(sorted((uid1, uid2))) for i, uid1 in enumerate(uid_list) for uid2 in uid_list[i+1:]]
+            previous_present = set()
 
             for d in range(DAYRANGE):
                 day = start_date + timedelta(days=d)
                 for slot in range(0, 144):
-                    slot_start = datetime.combine(day, datetime.min.time()) + timedelta(minutes=slot*SLOT_MINUTES)
+                    slot_start = datetime.combine(day, datetime.min.time()) + timedelta(minutes=slot * SLOT_MINUTES)
                     slot_end = slot_start + timedelta(minutes=SLOT_MINUTES)
 
+                    # 현재 시간대 출석자 확인
                     present = set()
                     for uid, sessions in user_sessions.items():
                         for ent, lev in sessions:
@@ -542,15 +545,17 @@ def compute_love_graph():
                     present = present & valid_user_ids
                     present_list = list(present)
 
+                    # 공통 출석 점수
                     for i in range(len(present_list)):
-                        uid1 = present_list[i]
-                        for j in range(i+1, len(present_list)):
+                        for j in range(i + 1, len(present_list)):
+                            uid1 = present_list[i]
                             uid2 = present_list[j]
-                            key = (uid1, uid2)
+                            key = tuple(sorted((uid1, uid2)))
                             scores[key] = scores.get(key, 0.0) * DECAY + LOVE_A
 
-                    for key in all_pairs:
-                        uid1, uid2 = key
+                    # 감점 및 동시 결석 decay
+                    for uid1, uid2 in all_pairs:
+                        key = (uid1, uid2)
                         in1 = uid1 in present
                         in2 = uid2 in present
                         if in1 != in2:
@@ -558,45 +563,52 @@ def compute_love_graph():
                         elif not in1 and not in2:
                             scores[key] = scores.get(key, 0.0) * DECAY
 
-            # 하이라이트 엣지 선정
-            # 전체 간선 중 weight 높은 순으로 상위 N개 선택
-            edge_weights = [
-                (tuple(sorted((uid1, uid2))), weight)
-                for (uid1, uid2), weight in scores.items()
-                if weight > MIN_EDGE_WEIGHT
-            ]
+                    # 💡 벡터 방식: 전 시간에 같이 있다가 이번엔 같이 안 온 사람에게 boost
+                    if previous_present:
+                        gone = previous_present - present
+                        gone_list = list(gone)
+                        for i in range(len(gone_list)):
+                            for j in range(i + 1, len(gone_list)):
+                                uid1 = gone_list[i]
+                                uid2 = gone_list[j]
+                                key = tuple(sorted((uid1, uid2)))
+                                scores[key] = scores.get(key, 0.0) + LOVE_MISSING_BOOST
 
-            edge_weights.sort(key=lambda x: -x[1])  # 내림차순 정렬
+                    previous_present = present.copy()
 
-            highlight_edges = set(edge_key for edge_key, _ in edge_weights[:LOVE_HIGHLIGHT_MAX])
-
-            # 링크 및 노드 구성
+            # 간선 정리
             links = []
             connected_nicks = set()
+            edge_nick_weights = []
+
             for (uid1, uid2), weight in scores.items():
                 if weight > MIN_EDGE_WEIGHT:
                     nick1 = id_to_nick.get(uid1)
                     nick2 = id_to_nick.get(uid2)
                     if not nick1 or not nick2:
                         continue
+                    nick_key = tuple(sorted((nick1, nick2)))
+                    edge_nick_weights.append((nick_key, weight))
 
-                    # ✅ 항상 정렬된 방향으로 간선 지정
-                    source, target = sorted([nick1, nick2])
-                    key = tuple(sorted((uid1, uid2)))
+            # 하이라이트 지정
+            edge_nick_weights.sort(key=lambda x: -x[1])
+            highlight_keys = set(k for k, _ in edge_nick_weights[:LOVE_HIGHLIGHT_MAX])
 
-                    links.append({
-                        "source": source,
-                        "target": target,
-                        "weight": weight,
-                        "highlight": key in highlight_edges
-                    })
-                    connected_nicks.update([source, target])
+            for nick_key, weight in edge_nick_weights:
+                links.append({
+                    "source": nick_key[0],
+                    "target": nick_key[1],
+                    "weight": weight,
+                    "highlight": nick_key in highlight_keys
+                })
+                connected_nicks.update(nick_key)
 
-            nodes = [{"id": nick, "nickname": nick} for nick in connected_nicks]
+            nodes = [{"id": nick, "nickname": nick} for nick in sorted(connected_nicks)]
             return {"nodes": nodes, "links": links}
 
     finally:
         conn.close()
+
 
 @app.route("/api/love-graph")
 def love_graph():

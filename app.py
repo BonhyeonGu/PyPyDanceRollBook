@@ -579,14 +579,18 @@ def compute_love_graph():
                     nick2 = id_to_nick.get(uid2)
                     if not nick1 or not nick2:
                         continue
-                    key = (uid1, uid2) if uid1 < uid2 else (uid2, uid1)
+
+                    # ✅ 항상 정렬된 방향으로 간선 지정
+                    source, target = sorted([nick1, nick2])
+                    key = tuple(sorted((uid1, uid2)))
+
                     links.append({
-                        "source": nick1,
-                        "target": nick2,
+                        "source": source,
+                        "target": target,
                         "weight": weight,
-                        "highlight": key in highlight_edges  # ✅ 하이라이트 여부 포함
+                        "highlight": key in highlight_edges
                     })
-                    connected_nicks.update([nick1, nick2])
+                    connected_nicks.update([source, target])
 
             nodes = [{"id": nick, "nickname": nick} for nick in connected_nicks]
             return {"nodes": nodes, "links": links}

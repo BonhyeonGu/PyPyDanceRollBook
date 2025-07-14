@@ -172,13 +172,16 @@ function drawLoveGraph(elements, isDark) {
                 selector: 'node',
                 style: {
                     'label': 'data(label)',
-                    'background-color': isDark ? '#60a5fa' : '#3b82f6',
+                    'background-image': 'data(img)',  // ✅ 이미지 경로를 노드에 사용
+                    'background-fit': 'cover',        // ✅ 이미지 꽉 채우기
+                    'background-color': '#999',       // ✅ fallback 배경
                     'color': isDark ? '#fff' : '#111',
-                    'text-valign': 'center',
+                    'text-valign': 'bottom',
                     'text-halign': 'center',
-                    'font-size': 6,    // 글자 크기
-                    'width': 40,       // 노드 크기
-                    'height': 40
+                    'font-size': 7,
+                    'text-margin-y': 2,
+                    'width': 50,
+                    'height': 50
                 }
             },
             {
@@ -328,7 +331,7 @@ export async function renderAnalysisPage() {
         const data = await res.json();
         loveElements = [
             ...data.nodes.map(n => ({
-                data: { id: n.id, label: n.nickname }
+                data: { id: n.id, label: n.nickname, img: n.img }
             })),
             ...data.links.map(e => ({
                 data: {

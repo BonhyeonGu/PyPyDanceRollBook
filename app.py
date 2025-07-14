@@ -18,6 +18,7 @@ with open("web_config.json", "r", encoding="utf-8") as f:
 
 DB_CONFIG = WEB_CONFIG["db"]
 PROFILE_IMG_DIR = WEB_CONFIG["profile_img_dir"]
+PROFILE_DEFAULT_FILENAME = "default.png"
 
 #---------------------------------------------------------------------------------------
 
@@ -295,7 +296,7 @@ def participants_by_date():
         img_filename = f"{nickname}.png"
         img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
         if not os.path.exists(img_path):
-            img_filename = "default.png"
+            img_filename = PROFILE_DEFAULT_FILENAME
 
         users.append({
             "nickname": nickname,
@@ -600,7 +601,18 @@ def compute_love_graph():
                 })
                 connected_nicks.update(nick_key)
 
-            nodes = [{"id": nick, "nickname": nick} for nick in sorted(connected_nicks)]
+            nodes = []
+            for nick in sorted(connected_nicks):
+                img_filename = f"{nick}.png"
+                img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
+                if not os.path.exists(img_path):
+                    img_filename = PROFILE_DEFAULT_FILENAME
+                nodes.append({
+                    "id": nick,
+                    "nickname": nick,
+                    "img": f"/static/profiles/{img_filename}"
+                })
+
             return {"nodes": nodes, "links": links}
 
     finally:
@@ -646,7 +658,7 @@ def get_user_info_by_nickname(cursor, nickname):
     img_filename = f"{nickname}.png"
     img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
     if not os.path.exists(img_path):
-        img_filename = "default.png"
+        img_filename = PROFILE_DEFAULT_FILENAME
 
     return {
         "user_id": user_id,

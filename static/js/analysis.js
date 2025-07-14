@@ -336,7 +336,7 @@ export async function renderAnalysisPage() {
                     source: e.source,
                     target: e.target,
                     weight: e.weight,
-                    label: `${Math.round(e.weight)}`
+                    label: `${e.weight.toFixed(2)}`
 
                 },
                 classes: e.highlight ? 'highlight' : ''

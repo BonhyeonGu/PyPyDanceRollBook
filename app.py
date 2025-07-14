@@ -7,6 +7,8 @@ import random
 from threading import Lock
 
 from collections import defaultdict
+import math
+import numpy as np
 
 
 app = Flask(__name__)
@@ -486,29 +488,37 @@ def weekday_attendance_summary():
 
 
 #---------------------------------------------------------------------------------------
-MIN_EDGE_WEIGHT = 5
-LOVE_A = 2.0
-LOVE_B = 5.0
-LOVE_MISSING_BOOST = 15.0
-SLOT_MINUTES = 10
-DECAY = 0.98       # 10분마다 decay
+# 하이퍼파라미터
+MIN_EDGE_WEIGHT = 0.5
+SLOT_MINUTES = 5
+SLOT_OFFSET_MINUTES = SLOT_MINUTES // 2
+DAYRANGE = 30
 EXCLUDED_NICKNAMES = {"아짱나", "미쿠", "Nine_Bones"}
-LOVE_HIGHLIGHT_MAX = 3 
+LOVE_HIGHLIGHT_MAX = 5
+SOFT_SIGMA = 1.0  # soft cosine에서 시간 슬롯 유사도 제어
+
+MIN_EDGE_WEIGHT = 0.5
+SLOT_MINUTES = 5
+SLOT_OFFSET_MINUTES = SLOT_MINUTES // 2
+DAYRANGE = 30
+EXCLUDED_NICKNAMES = {"아짱나", "미쿠", "Nine_Bones"}
+LOVE_HIGHLIGHT_MAX = 5
 
 def compute_love_graph():
+    SLOTS_PER_DAY = (60 * 24) // SLOT_MINUTES  # 288
+    TOTAL_SLOTS = SLOTS_PER_DAY * 2 * DAYRANGE  # offset 포함
+
     end_date = datetime.now().date() - timedelta(days=1)
     start_date = end_date - timedelta(days=DAYRANGE - 1)
     conn = pymysql.connect(**DB_CONFIG)
 
     try:
         with conn.cursor() as cursor:
-            # 유저 매핑
             cursor.execute("SELECT user_id, nickname FROM users")
             users = cursor.fetchall()
             id_to_nick = {uid: nick for uid, nick in users if nick not in EXCLUDED_NICKNAMES}
             valid_user_ids = set(id_to_nick.keys())
 
-            # 출석 정보
             cursor.execute("""
                 SELECT user_id, enter_time, leave_time
                 FROM attendance
@@ -518,71 +528,59 @@ def compute_love_graph():
             [start_date, end_date] + list(valid_user_ids))
             all_rows = cursor.fetchall()
 
-            # 세션 구성
             user_sessions = defaultdict(list)
-            for uid, enter, leave in all_rows:
-                user_sessions[uid].append((enter, leave))
+            for uid, ent, lev in all_rows:
+                user_sessions[uid].append((ent, lev))
 
-            scores = {}
-            uid_list = list(valid_user_ids)
-            all_pairs = [tuple(sorted((uid1, uid2))) for i, uid1 in enumerate(uid_list) for uid2 in uid_list[i+1:]]
-            previous_present = set()
+            user_vectors = {}
+            for uid in valid_user_ids:
+                user_vectors[uid] = np.zeros(TOTAL_SLOTS, dtype=np.float32)
 
             for d in range(DAYRANGE):
                 day = start_date + timedelta(days=d)
-                for slot in range(0, 144):
-                    slot_start = datetime.combine(day, datetime.min.time()) + timedelta(minutes=slot * SLOT_MINUTES)
-                    slot_end = slot_start + timedelta(minutes=SLOT_MINUTES)
+                for slot in range(SLOTS_PER_DAY):
+                    base_start = datetime.combine(day, datetime.min.time()) + timedelta(minutes=slot * SLOT_MINUTES)
+                    base_end = base_start + timedelta(minutes=SLOT_MINUTES)
+                    offset_start = base_start + timedelta(minutes=SLOT_OFFSET_MINUTES)
+                    offset_end = offset_start + timedelta(minutes=SLOT_MINUTES)
 
-                    # 현재 시간대 출석자 확인
-                    present = set()
-                    for uid, sessions in user_sessions.items():
-                        for ent, lev in sessions:
-                            if ent < slot_end and lev > slot_start:
-                                present.add(uid)
-                                break
+                    for uid in valid_user_ids:
+                        for ent, lev in user_sessions[uid]:
+                            base_idx = d * SLOTS_PER_DAY * 2 + slot * 2
+                            if ent < base_end and lev > base_start:
+                                user_vectors[uid][base_idx] = 1
+                            if ent < offset_end and lev > offset_start:
+                                user_vectors[uid][base_idx + 1] = 1
 
-                    present = present & valid_user_ids
-                    present_list = list(present)
+            # 🔸 슬롯 유사도 행렬 S 생성: 가까운 슬롯은 1, 멀수록 감소 (가우시안 감쇠)
+            slot_sim = np.zeros((TOTAL_SLOTS, TOTAL_SLOTS), dtype=np.float32)
+            decay_sigma = 1.5  # 시간 간격 감쇠율 조정
+            for i in range(TOTAL_SLOTS):
+                for j in range(TOTAL_SLOTS):
+                    dist = abs(i - j)
+                    slot_sim[i, j] = math.exp(- (dist ** 2) / (2 * (decay_sigma ** 2)))
 
-                    # 공통 출석 점수
-                    for i in range(len(present_list)):
-                        for j in range(i + 1, len(present_list)):
-                            uid1 = present_list[i]
-                            uid2 = present_list[j]
-                            key = tuple(sorted((uid1, uid2)))
-                            scores[key] = scores.get(key, 0.0) * DECAY + LOVE_A
+            # 🔸 Soft Cosine 유사도 계산
+            uid_list = list(valid_user_ids)
+            scores = {}
+            for i in range(len(uid_list)):
+                for j in range(i + 1, len(uid_list)):
+                    uid1, uid2 = uid_list[i], uid_list[j]
+                    vec1 = user_vectors[uid1]
+                    vec2 = user_vectors[uid2]
+                    numerator = float(vec1 @ slot_sim @ vec2)
+                    denom1 = float(vec1 @ slot_sim @ vec1)
+                    denom2 = float(vec2 @ slot_sim @ vec2)
+                    score = numerator / (math.sqrt(denom1) * math.sqrt(denom2)) if denom1 > 0 and denom2 > 0 else 0.0
+                    scores[(uid1, uid2)] = score
 
-                    # 감점 및 동시 결석 decay
-                    for uid1, uid2 in all_pairs:
-                        key = (uid1, uid2)
-                        in1 = uid1 in present
-                        in2 = uid2 in present
-                        if in1 != in2:
-                            scores[key] = scores.get(key, 0.0) * DECAY - LOVE_B
-                        elif not in1 and not in2:
-                            scores[key] = scores.get(key, 0.0) * DECAY
-
-                    # 💡 벡터 방식: 전 시간에 같이 있다가 이번엔 같이 안 온 사람에게 boost
-                    if previous_present:
-                        gone = previous_present - present
-                        gone_list = list(gone)
-                        for i in range(len(gone_list)):
-                            for j in range(i + 1, len(gone_list)):
-                                uid1 = gone_list[i]
-                                uid2 = gone_list[j]
-                                key = tuple(sorted((uid1, uid2)))
-                                scores[key] = scores.get(key, 0.0) + LOVE_MISSING_BOOST
-
-                    previous_present = present.copy()
-
-            # 간선 정리
+            # 🔸 간선 정리
             links = []
             connected_nicks = set()
             edge_nick_weights = []
 
             for (uid1, uid2), weight in scores.items():
-                if weight > MIN_EDGE_WEIGHT:
+                if weight >= MIN_EDGE_WEIGHT:
                     nick1 = id_to_nick.get(uid1)
                     nick2 = id_to_nick.get(uid2)
                     if not nick1 or not nick2:
@@ -590,7 +588,6 @@ def compute_love_graph():
                     nick_key = tuple(sorted((nick1, nick2)))
                     edge_nick_weights.append((nick_key, weight))
 
-            # 하이라이트 지정
             edge_nick_weights.sort(key=lambda x: -x[1])
             highlight_keys = set(k for k, _ in edge_nick_weights[:LOVE_HIGHLIGHT_MAX])
 

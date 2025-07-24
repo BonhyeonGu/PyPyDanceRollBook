@@ -1,128 +1,188 @@
 import pymysql
 import json
+import os
 from datetime import datetime, timedelta
+from collections import defaultdict
+
+START_DAY = '2025-05-12'
+DEFAULT_CACHE_PATH = "achievement_cache.json"
+CONFIG_PATH = "config.json"
+
+def load_achievement_cache(cache_path=DEFAULT_CACHE_PATH):
+    """
+    캐시 파일을 불러옵니다. 없으면 빈 딕셔너리 반환.
+    """
+    if os.path.exists(cache_path):
+        with open(cache_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_achievement_cache(cache_data, cache_path=DEFAULT_CACHE_PATH):
+    """
+    캐시 데이터를 파일에 저장합니다.
+    """
+    with open(cache_path, "w", encoding="utf-8") as f:
+        json.dump(cache_data, f, ensure_ascii=False, indent=2)
+
+def ensure_achievement_key(cache_data, achievement_name):
+    """
+    주어진 캐시에 해당 도전과제 키가 없으면 빈 딕셔너리로 초기화합니다.
+    """
+    if achievement_name not in cache_data:
+        cache_data[achievement_name] = {}
+    return cache_data[achievement_name]
+
+def sync_cache_to_db(cache_data, achievement_name, conn):
+    """
+    캐시에 저장된 user_id → 날짜 정보를 DB에 반영합니다.
+    이미 DB에 있는 경우는 무시됩니다.
+    """
+    with conn.cursor() as cursor:
+        # 도전과제 ID 조회
+        cursor.execute("""
+            SELECT achievement_id FROM achievements WHERE name = %s
+        """, (achievement_name,))
+        result = cursor.fetchone()
+        if not result:
+            raise ValueError(f"[ERROR] 도전과제 '{achievement_name}'이 존재하지 않습니다.")
+        achievement_id = result[0]
+
+        # 이미 존재하는 (user_id, date) 쌍 조회
+        cursor.execute("""
+            SELECT user_id, DATE(achieved_at) FROM user_achievements
+            WHERE achievement_id = %s
+        """, (achievement_id,))
+        already_in_db = {(uid, date.strftime("%Y-%m-%d")) for uid, date in cursor.fetchall()}
+
+        inserted = 0
+        for uid_str, date in cache_data.get(achievement_name, {}).items():
+            uid = int(uid_str)  # 👈 명시적으로 int 변환
+            if (uid, date) not in already_in_db:
+                cursor.execute("""
+                    INSERT IGNORE INTO user_achievements (user_id, achievement_id, achieved_at)
+                    VALUES (%s, %s, %s)
+                """, (uid, achievement_id, date))  # 👈 uid는 이제 int형
+                inserted += 1
+
+        if inserted:
+            conn.commit()
+            print(f"[SYNC] 캐시에서 DB로 {inserted}건 삽입 완료.")
+
 
 #인싸:        10명이서 저댄
-def award_inssa_achievement_from_date(start_date_str, config_path="config.json"):
+def award_inssa_achievement_from_date(start_date_str: str, conn):
     """
-    start_date_str: 'YYYY-MM-DD' 형식
-    config_path: JSON 파일 경로 (기본값: 'config.json')
+    '인싸' 도전과제: 하루에 10명 이상이 참여한 날, 그날 참석한 모든 유저에게 도전과제 부여
+    - 캐시: 기록용
+    - 중복 방지: DB 기준으로 판단
+    - conn: 외부에서 주입된 pymysql 커넥션
     """
-    # ✅ config.json 불러오기
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    db_conf = config["db"]
-    # ✅ pymysql이 요구하는 DB config 키 이름 맞추기
-    db_params = {
-        "host": db_conf["host"],
-        "port": db_conf["port"],
-        "user": db_conf["user"],
-        "password": db_conf["password"],
-        "db": db_conf["database"],
-        "charset": "utf8mb4"
-    }
+    # 📌 캐시 로딩 및 키 보장
+    cache = load_achievement_cache()
+    inssa_cache = ensure_achievement_key(cache, "인싸")
 
-    conn = pymysql.connect(**db_params)
+    # 📌 캐시 → DB 동기화
+    sync_cache_to_db(cache, "인싸", conn)
+
     try:
         with conn.cursor() as cursor:
-            # 1️⃣ '인싸' 도전과제 ID 조회
-            cursor.execute("""
-                SELECT achievement_id FROM achievements WHERE name = '인싸'
-            """)
+            # 1️⃣ 도전과제 ID 조회
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = '인싸'")
             result = cursor.fetchone()
             if not result:
                 print("[ERROR] '인싸' 도전과제가 존재하지 않습니다.")
                 return
             achievement_id = result[0]
 
-            # 2️⃣ 시작일 ~ 오늘까지 날짜 목록 생성
+            # 2️⃣ 날짜 루프
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
             today = datetime.today().date()
             current_date = start_date
+            new_awards = {}
 
             while current_date <= today:
                 date_str = current_date.strftime("%Y-%m-%d")
-                # 3️⃣ 해당 날짜의 10명 이상 참여자 조회
+
+                # 3️⃣ 해당 날짜 참여 유저 조회
                 cursor.execute("""
-                    SELECT DISTINCT a.user_id
-                    FROM attendance a
-                    WHERE DATE(a.enter_time) = %s
+                    SELECT DISTINCT user_id
+                    FROM attendance
+                    WHERE DATE(enter_time) = %s
                 """, (date_str,))
-                users = cursor.fetchall()
+                user_ids = [row[0] for row in cursor.fetchall()]
 
-                if len(users) >= 10:
-                    user_ids = [row[0] for row in users]
-
-                    # 4️⃣ 이미 '인싸' 도전과제를 획득한 유저 제외
+                if len(user_ids) >= 10:
+                    # 4️⃣ DB 기준 중복 제거
                     cursor.execute("""
                         SELECT user_id FROM user_achievements
                         WHERE achievement_id = %s
                     """, (achievement_id,))
-                    achieved_users = {row[0] for row in cursor.fetchall()}
+                    already_awarded = {row[0] for row in cursor.fetchall()}
 
-                    # 5️⃣ 이번 날짜 참여자 중 달성 안 한 유저만 추림
-                    new_achievers = [uid for uid in user_ids if uid not in achieved_users]
+                    to_award = [uid for uid in user_ids if uid not in already_awarded]
 
-                    if new_achievers:
-                        for uid in new_achievers:
-                            cursor.execute("""
-                                INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
-                                VALUES (%s, %s, %s)
-                            """, (uid, achievement_id, date_str))
+                    # 5️⃣ INSERT & 캐시에 기록
+                    for uid in to_award:
+                        cursor.execute("""
+                            INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                            VALUES (%s, %s, %s)
+                        """, (uid, achievement_id, date_str))
+                        new_awards[str(uid)] = date_str
+
+                    if to_award:
                         conn.commit()
-                        print(f"[INFO] {date_str}: {len(new_achievers)}명에게 '인싸' 도전과제 지급 완료!")
+                        print(f"[INFO] {date_str}: {len(to_award)}명에게 '인싸' 도전과제 지급 완료!")
                     else:
                         print(f"[INFO] {date_str}: 이미 모두 달성함.")
                 else:
-                    print(f"[INFO] {date_str}: 참여자 {len(users)}명으로, 조건 불충족.")
+                    print(f"[INFO] {date_str}: 참여자 {len(user_ids)}명으로 조건 불충족.")
 
                 current_date += timedelta(days=1)
-    finally:
-        conn.close()
+
+        # 6️⃣ 캐시 갱신 및 저장
+        inssa_cache.update(new_awards)
+        save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[FATAL] 실행 중 예외 발생: {e}")
 
 #칠가이:        7일 연속 저댄
-def award_chill_guy_achievement(config_path="config.json"):
-    # ✅ config.json 불러오기
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    db_conf = config["db"]
-    db_params = {
-        "host": db_conf["host"],
-        "port": db_conf["port"],
-        "user": db_conf["user"],
-        "password": db_conf["password"],
-        "db": db_conf["database"],
-        "charset": "utf8mb4"
-    }
+def award_chill_guy_achievement(conn):
+    cache = load_achievement_cache()
+    chill_cache = ensure_achievement_key(cache, "ChillGuy")
 
-    conn = pymysql.connect(**db_params)
     try:
+        sync_cache_to_db(cache, "ChillGuy", conn)
+
         with conn.cursor() as cursor:
-            # 1️⃣ 'ChillGuy' 도전과제 ID 조회
-            cursor.execute("""
-                SELECT achievement_id FROM achievements WHERE name = 'ChillGuy'
-            """)
+            # 1️⃣ 도전과제 ID 조회
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = 'ChillGuy'")
             result = cursor.fetchone()
             if not result:
                 print("[ERROR] 'ChillGuy' 도전과제가 존재하지 않습니다.")
                 return
             achievement_id = result[0]
 
-            # 2️⃣ 이미 'ChillGuy' 달성한 유저 목록 조회
+            # 2️⃣ 전체 유저 조회
+            cursor.execute("SELECT DISTINCT user_id FROM attendance")
+            all_users = [row[0] for row in cursor.fetchall()]
+
+            # 2-1️⃣ DB에 이미 달성한 유저 확인
             cursor.execute("""
                 SELECT user_id FROM user_achievements
                 WHERE achievement_id = %s
             """, (achievement_id,))
-            achieved_users = {row[0] for row in cursor.fetchall()}
+            already_awarded = {row[0] for row in cursor.fetchall()}
 
-            # 3️⃣ 전체 유저 목록 조회 (도전과제 없는 유저만)
-            cursor.execute("""
-                SELECT DISTINCT user_id FROM attendance
-            """)
-            all_users = [row[0] for row in cursor.fetchall()]
-            target_users = [uid for uid in all_users if uid not in achieved_users]
+            # 2-2️⃣ 캐시 + DB 모두에 없는 유저만 대상
+            target_users = [
+                uid for uid in all_users
+                if str(uid) not in chill_cache and uid not in already_awarded
+            ]
 
-            # 4️⃣ 각 유저의 출석 기록 확인
+            new_awards = {}
+
+            # 3️⃣ 7일 연속 출석 검사
             for uid in target_users:
                 cursor.execute("""
                     SELECT DISTINCT DATE(enter_time) as day
@@ -132,153 +192,126 @@ def award_chill_guy_achievement(config_path="config.json"):
                 """, (uid,))
                 dates = [row[0] for row in cursor.fetchall()]
                 if len(dates) < 7:
-                    continue  # 최소 7일 이상 출석한 적이 없으면 스킵
+                    continue
 
-                # 5️⃣ 7일 연속 출석 확인
                 dates_set = set(dates)
                 for i in range(len(dates)):
                     start_date = dates[i]
-                    success = True
-                    for j in range(7):
-                        day = start_date + timedelta(days=j)
-                        if day not in dates_set:
-                            success = False
-                            break
-                    if success:
-                        # 7일 연속 출석 성공!
+                    if all((start_date + timedelta(days=j)) in dates_set for j in range(7)):
+                        achieved_at = (start_date + timedelta(days=6)).strftime("%Y-%m-%d")
                         cursor.execute("""
                             INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
                             VALUES (%s, %s, %s)
-                        """, (uid, achievement_id, (start_date + timedelta(days=6)).strftime("%Y-%m-%d")))
+                        """, (uid, achievement_id, achieved_at))
                         conn.commit()
+                        new_awards[str(uid)] = achieved_at
                         print(f"[INFO] 유저 {uid} - 7일 연속 출석으로 'ChillGuy' 달성!")
-                        break  # 이 유저는 조건 충족했으니 더 확인할 필요 없음
+                        break
 
-    finally:
-        conn.close()
+            # 5️⃣ 캐시 갱신
+            chill_cache.update(new_awards)
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 오류 발생: {e}")
 
 #과몰입:        단 둘이서
-def award_over_immersed_achievement_from_date(start_date_str, config_path="config.json"):
+def award_over_immersed_achievement_from_date(start_date_str, conn):
     """
-    도전과제 '과몰입'을 해당하지 않는 유저들 중, 특정 날짜 이후로 딱 두 명만 접속한 기록이 있으면 부여합니다.
+    도전과제 '과몰입' 부여:
+    특정 날짜 이후, 딱 두 명만 출석한 날에 한하여,
+    그 두 명 중 아직 해당 도전과제를 획득하지 않은 사람에게 부여.
     """
-    # ✅ config.json 불러오기
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    db_conf = config["db"]
-    db_params = {
-        "host": db_conf["host"],
-        "port": db_conf["port"],
-        "user": db_conf["user"],
-        "password": db_conf["password"],
-        "db": db_conf["database"],
-        "charset": "utf8mb4"
-    }
 
-    conn = pymysql.connect(**db_params)
+    cache = load_achievement_cache()
+    over_cache = ensure_achievement_key(cache, "과몰입")
+
     try:
+        sync_cache_to_db(cache, "과몰입", conn)
+
         with conn.cursor() as cursor:
             # 1️⃣ '과몰입' 도전과제 ID 조회
-            cursor.execute("""
-                SELECT achievement_id FROM achievements WHERE name = '과몰입'
-            """)
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = '과몰입'")
             result = cursor.fetchone()
             if not result:
                 print("[ERROR] '과몰입' 도전과제가 존재하지 않습니다.")
                 return
             achievement_id = result[0]
 
-            # 2️⃣ 이미 '과몰입' 달성한 유저 목록 조회
-            cursor.execute("""
-                SELECT user_id FROM user_achievements
-                WHERE achievement_id = %s
-            """, (achievement_id,))
-            achieved_users = {row[0] for row in cursor.fetchall()}
-
-            # 3️⃣ 시작일 ~ 오늘까지 날짜 순회
+            # 2️⃣ 시작일부터 오늘까지 순회
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
             today = datetime.today().date()
             current_date = start_date
 
+            new_awards = {}
+
             while current_date <= today:
                 date_str = current_date.strftime("%Y-%m-%d")
-                # 4️⃣ 해당 날짜의 참여자 조회
+
                 cursor.execute("""
-                    SELECT DISTINCT a.user_id
-                    FROM attendance a
-                    WHERE DATE(a.enter_time) = %s
+                    SELECT DISTINCT user_id
+                    FROM attendance
+                    WHERE DATE(enter_time) = %s
                 """, (date_str,))
                 users = [row[0] for row in cursor.fetchall()]
 
                 if len(users) == 2:
-                    # 5️⃣ 두명 중 이미 도전과제 달성자 제외
-                    new_achievers = [uid for uid in users if uid not in achieved_users]
+                    new_achievers = [uid for uid in users if str(uid) not in over_cache]
+
+                    for uid in new_achievers:
+                        cursor.execute("""
+                            INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                            VALUES (%s, %s, %s)
+                        """, (uid, achievement_id, date_str))
+                        new_awards[str(uid)] = date_str
 
                     if new_achievers:
-                        for uid in new_achievers:
-                            cursor.execute("""
-                                INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
-                                VALUES (%s, %s, %s)
-                            """, (uid, achievement_id, date_str))
                         conn.commit()
                         print(f"[INFO] {date_str}: {len(new_achievers)}명에게 '과몰입' 도전과제 지급 완료!")
                     else:
-                        print(f"[INFO] {date_str}: 이미 모두 달성함.")
+                        print(f"[INFO] {date_str}: 캐시에 의해 모두 달성된 상태입니다.")
                 else:
                     print(f"[INFO] {date_str}: 참여자 수 {len(users)}명 → 조건 불충족.")
 
                 current_date += timedelta(days=1)
 
-    finally:
-        conn.close()
+            over_cache.update(new_awards)
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 예외 발생: {e}")
 
 #완장:         나없을때 저댄
-def award_captain_achievement_from_date(start_date_str, config_path="config.json"):
+def award_captain_achievement_from_date(start_date_str, conn):
     """
     '완장' 도전과제 부여 함수.
-    Nine_Bones가 없는 날 접속한 모든 유저에게 도전과제를 부여합니다.
+    Nine_Bones가 참여하지 않은 날의 출석자 중 아직 도전과제를 획득하지 않은 사람에게 부여.
     """
-    # ✅ config.json 불러오기
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    db_conf = config["db"]
-    db_params = {
-        "host": db_conf["host"],
-        "port": db_conf["port"],
-        "user": db_conf["user"],
-        "password": db_conf["password"],
-        "db": db_conf["database"],
-        "charset": "utf8mb4"
-    }
 
-    conn = pymysql.connect(**db_params)
+    cache = load_achievement_cache()
+    captain_cache = ensure_achievement_key(cache, "완장")
+
     try:
+        sync_cache_to_db(cache, "완장", conn)
+
         with conn.cursor() as cursor:
             # 1️⃣ '완장' 도전과제 ID 조회
-            cursor.execute("""
-                SELECT achievement_id FROM achievements WHERE name = '완장'
-            """)
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = '완장'")
             result = cursor.fetchone()
             if not result:
                 print("[ERROR] '완장' 도전과제가 존재하지 않습니다.")
                 return
             achievement_id = result[0]
 
-            # 2️⃣ 이미 '완장' 달성한 유저 목록 조회
-            cursor.execute("""
-                SELECT user_id FROM user_achievements
-                WHERE achievement_id = %s
-            """, (achievement_id,))
-            achieved_users = {row[0] for row in cursor.fetchall()}
-
-            # 3️⃣ 시작일 ~ 오늘까지 날짜 순회
+            # 2️⃣ 날짜 순회
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
             today = datetime.today().date()
             current_date = start_date
 
+            new_awards = {}
+
             while current_date <= today:
                 date_str = current_date.strftime("%Y-%m-%d")
-                # 4️⃣ 해당 날짜 참여자 조회
                 cursor.execute("""
                     SELECT DISTINCT a.user_id, u.nickname
                     FROM attendance a
@@ -287,53 +320,53 @@ def award_captain_achievement_from_date(start_date_str, config_path="config.json
                 """, (date_str,))
                 rows = cursor.fetchall()
 
-                # 5️⃣ Nine_Bones가 있으면 스킵
                 nicknames = [row[1] for row in rows]
                 if "Nine_Bones" in nicknames:
                     print(f"[INFO] {date_str}: Nine_Bones가 참여 → 조건 불충족.")
-                elif rows:  # Nine_Bones가 없고, 참여자가 있으면
-                    new_achievers = [row[0] for row in rows if row[0] not in achieved_users]
+                elif rows:
+                    # 캐시에 없는 사람만 추출
+                    new_achievers = [row[0] for row in rows if str(row[0]) not in captain_cache]
+
+                    for uid in new_achievers:
+                        cursor.execute("""
+                            INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                            VALUES (%s, %s, %s)
+                        """, (uid, achievement_id, date_str))
+                        new_awards[str(uid)] = date_str
+
                     if new_achievers:
-                        for uid in new_achievers:
-                            cursor.execute("""
-                                INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
-                                VALUES (%s, %s, %s)
-                            """, (uid, achievement_id, date_str))
                         conn.commit()
                         print(f"[INFO] {date_str}: {len(new_achievers)}명에게 '완장' 도전과제 지급 완료!")
                     else:
-                        print(f"[INFO] {date_str}: 이미 모두 달성함.")
+                        print(f"[INFO] {date_str}: 캐시에 의해 모두 달성함.")
                 else:
                     print(f"[INFO] {date_str}: 참여자가 없습니다.")
+
                 current_date += timedelta(days=1)
 
-    finally:
-        conn.close()
+            # 캐시 저장
+            captain_cache.update(new_awards)
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 오류 발생: {e}")
 
 #최애숭배:      한 곡 30번
-def award_favorite_song_achievement(config_path="config.json"):
+def award_favorite_song_achievement(conn):
     """
-    '최애숭배' 도전과제를 아직 받지 않은 유저를 대상으로,
-    같은 곡을 30일 이상 튼 기록이 있으면,
-    최초로 30일째가 되었던 날짜를 기준으로 달성 처리합니다.
-    하루에 여러 번 틀어도 1번으로 계산합니다.
+    '최애숭배' 도전과제 부여:
+    같은 곡을 30일 이상 튼 유저에게, 30번째 날짜를 달성일로 기록.
+    하루에 여러 번 재생해도 1일 1회로 계산.
     """
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    db_conf = config["db"]
-    db_params = {
-        "host": db_conf["host"],
-        "port": db_conf["port"],
-        "user": db_conf["user"],
-        "password": db_conf["password"],
-        "db": db_conf["database"],
-        "charset": "utf8mb4"
-    }
 
-    conn = pymysql.connect(**db_params)
+    cache = load_achievement_cache()
+    favorite_cache = ensure_achievement_key(cache, "최애숭배")
+
     try:
+        sync_cache_to_db(cache, "최애숭배", conn)
+
         with conn.cursor() as cursor:
-            # 도전과제 ID 조회
+            # 1️⃣ 도전과제 ID 조회
             cursor.execute("SELECT achievement_id FROM achievements WHERE name = '최애숭배'")
             result = cursor.fetchone()
             if not result:
@@ -341,17 +374,15 @@ def award_favorite_song_achievement(config_path="config.json"):
                 return
             achievement_id = result[0]
 
-            # 이미 달성한 유저 제외
-            cursor.execute("SELECT user_id FROM user_achievements WHERE achievement_id = %s", (achievement_id,))
-            achieved_users = {row[0] for row in cursor.fetchall()}
-
-            # 음악 기록 있는 유저 중 미달성자 추림
+            # 2️⃣ music_play 기록이 있는 유저 중 캐시에 없는 유저만 추림
             cursor.execute("SELECT DISTINCT user_id FROM music_play")
             all_users = [row[0] for row in cursor.fetchall()]
-            target_users = [uid for uid in all_users if uid not in achieved_users]
+            target_users = [uid for uid in all_users if str(uid) not in favorite_cache]
+
+            new_awards = {}
 
             for uid in target_users:
-                # 각 곡별로 해당 유저가 플레이한 날짜 목록
+                # 곡별로 재생 날짜 수집 (중복 날짜 제거용 GROUP BY)
                 cursor.execute("""
                     SELECT title, DATE(played_at) as play_day
                     FROM music_play
@@ -361,76 +392,58 @@ def award_favorite_song_achievement(config_path="config.json"):
                 """, (uid,))
                 rows = cursor.fetchall()
 
-                # 곡별로 날짜 모음
-                from collections import defaultdict
                 song_days = defaultdict(list)
                 for title, play_day in rows:
                     song_days[title].append(play_day)
 
                 for title, days in song_days.items():
                     if len(days) >= 30:
-                        achieved_at = days[29]  # 30번째 날짜 (0-indexed)
+                        achieved_at = days[29]  # 0-indexed 30번째 날짜
                         cursor.execute("""
                             INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
                             VALUES (%s, %s, %s)
                         """, (uid, achievement_id, achieved_at.strftime('%Y-%m-%d')))
                         conn.commit()
+                        new_awards[str(uid)] = achieved_at.strftime('%Y-%m-%d')
                         print(f"[INFO] 유저 {uid} - '{title}'을 {len(days)}일간 재생 → '최애숭배' 달성일: {achieved_at}")
-                        break  # 한 곡으로 조건 충족했으면 다음 유저로
-                    else:
-                        continue
+                        break  # 한 곡으로 만족하면 다음 유저로
 
-    finally:
-        conn.close()
+            favorite_cache.update(new_awards)
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 예외 발생: {e}")
 
 #39:           39가지의 곡
-def award_39_achievement(config_path="config.json"):
+def award_39_achievement(conn):
     """
-    '39' 도전과제를 아직 받지 않은 유저를 대상으로,
-    서로 다른 곡을 39개 이상 플레이했으면,
-    **최초로 39번째 곡을 플레이한 날짜**를 기준으로 달성 처리합니다.
+    '39' 도전과제 부여:
+    서로 다른 곡 39개 이상 플레이한 유저에게,
+    39번째 곡의 최초 재생일을 기준으로 달성 처리.
     """
-    # ✅ config.json 불러오기
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    db_conf = config["db"]
-    db_params = {
-        "host": db_conf["host"],
-        "port": db_conf["port"],
-        "user": db_conf["user"],
-        "password": db_conf["password"],
-        "db": db_conf["database"],
-        "charset": "utf8mb4"
-    }
-
-    conn = pymysql.connect(**db_params)
     try:
+        cache = load_achievement_cache()
+        a39_cache = ensure_achievement_key(cache, "39")
+
+        sync_cache_to_db(cache, "39", conn)
+
         with conn.cursor() as cursor:
-            # 1️⃣ '39' 도전과제 ID 조회
-            cursor.execute("""
-                SELECT achievement_id FROM achievements WHERE name = '39'
-            """)
+            # 1️⃣ 도전과제 ID 조회
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = '39'")
             result = cursor.fetchone()
             if not result:
                 print("[ERROR] '39' 도전과제가 존재하지 않습니다.")
                 return
             achievement_id = result[0]
 
-            # 2️⃣ 이미 달성한 유저 제외
-            cursor.execute("""
-                SELECT user_id FROM user_achievements
-                WHERE achievement_id = %s
-            """, (achievement_id,))
-            achieved_users = {row[0] for row in cursor.fetchall()}
-
-            # 3️⃣ 음악 기록 있는 유저 중 미달성자 추림
-            cursor.execute("""
-                SELECT DISTINCT user_id FROM music_play
-            """)
+            # 2️⃣ music_play 기록 있는 유저 중 캐시에 없는 유저만 추림
+            cursor.execute("SELECT DISTINCT user_id FROM music_play")
             all_users = [row[0] for row in cursor.fetchall()]
-            target_users = [uid for uid in all_users if uid not in achieved_users]
+            target_users = [uid for uid in all_users if str(uid) not in a39_cache]
 
-            # 4️⃣ 각 유저별 서로 다른 곡의 최초 플레이일 정렬
+            new_awards = {}
+
+            # 3️⃣ 각 유저별 서로 다른 곡의 최초 재생일 정렬
             for uid in target_users:
                 cursor.execute("""
                     SELECT MIN(played_at) as first_played
@@ -441,24 +454,29 @@ def award_39_achievement(config_path="config.json"):
                     LIMIT 39
                 """, (uid,))
                 rows = cursor.fetchall()
+
                 if len(rows) < 39:
                     print(f"[INFO] 유저 {uid}: 조건 미충족 (서로 다른 곡 {len(rows)}개).")
                     continue
 
-                achieved_at = rows[-1][0].date()  # 39번째 곡의 최초 플레이 날짜
-
+                achieved_at = rows[-1][0].date()
                 cursor.execute("""
                     INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
                     VALUES (%s, %s, %s)
-                """, (uid, achievement_id, achieved_at))
+                """, (uid, achievement_id, achieved_at.strftime('%Y-%m-%d')))
                 conn.commit()
+
+                new_awards[str(uid)] = achieved_at.strftime('%Y-%m-%d')
                 print(f"[INFO] 유저 {uid} - 최초 39곡 달성일: {achieved_at} → '39' 달성!")
 
-    finally:
-        conn.close()
+            a39_cache.update(new_awards)
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 예외 발생: {e}")
 
 #파인튜닝:    30일동안 평균 55분
-def award_finetuning_achievement(config_path="config.json", verbose: bool = True):
+def award_finetuning_achievement(conn, verbose: bool = False):
     """
     유저의 각 출석일 기준, 해당 날짜 포함 이전 출석일 최대 30개에 대해
     평균 플레이 시간이 55분 이상이면 도전과제 '파인튜닝'을 달성합니다.
@@ -468,20 +486,12 @@ def award_finetuning_achievement(config_path="config.json", verbose: bool = True
     ✅ 각 날짜의 참여 시간도 함께 로그에 출력
     """
 
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    db_conf = config["db"]
-    db_params = {
-        "host": db_conf["host"],
-        "port": db_conf["port"],
-        "user": db_conf["user"],
-        "password": db_conf["password"],
-        "db": db_conf["database"],
-        "charset": "utf8mb4"
-    }
+    cache = load_achievement_cache()
+    fine_cache = ensure_achievement_key(cache, "finet파인튜닝uning")
 
-    conn = pymysql.connect(**db_params)
     try:
+        sync_cache_to_db(cache, "파인튜닝", conn)
+
         with conn.cursor() as cursor:
             # 1️⃣ 도전과제 ID 조회
             cursor.execute("""
@@ -493,17 +503,12 @@ def award_finetuning_achievement(config_path="config.json", verbose: bool = True
                 return
             achievement_id = result[0]
 
-            # 2️⃣ 이미 달성한 유저 제외
-            cursor.execute("""
-                SELECT user_id FROM user_achievements
-                WHERE achievement_id = %s
-            """, (achievement_id,))
-            achieved_users = {row[0] for row in cursor.fetchall()}
-
-            # 3️⃣ 출석 기록 있는 유저 조회
+            # 2️⃣ 출석 기록 있는 유저 중 캐시에 없는 유저만 대상
             cursor.execute("SELECT DISTINCT user_id FROM attendance")
             all_users = [row[0] for row in cursor.fetchall()]
-            target_users = [uid for uid in all_users if uid not in achieved_users]
+            target_users = [uid for uid in all_users if str(uid) not in fine_cache]
+
+            new_awards = {}
 
             for uid in target_users:
                 # 출석일 목록 (오름차순)
@@ -545,48 +550,258 @@ def award_finetuning_achievement(config_path="config.json", verbose: bool = True
                     """, (uid, start_day, end_day))
                     per_day_durations = {row[0]: row[1] for row in cursor.fetchall()}
 
-                    # 로그
                     if verbose:
-                        day_str_list = []
-                        for d in window_days:
-                            mins = (per_day_durations.get(d, 0)) / 60
-                            day_str_list.append(f"{d.strftime('%m-%d')} ({mins:.1f}분)")
-
+                        day_str_list = [
+                            f"{d.strftime('%m-%d')} ({(per_day_durations.get(d, 0))/60:.1f}분)"
+                            for d in window_days
+                        ]
                         status = "✅" if len(window_days) == 30 and avg_minutes >= 55 else "❌"
                         print(f"[유저 {uid}] ▶ 기준일: {current_day.strftime('%m-%d')} | 출석일 수: {len(window_days)} | 평균: {avg_minutes:.2f}분 {status}")
                         print(f"       ↳ 날짜들: [{', '.join(day_str_list)}]")
 
-                    # 조건 만족 시 등록 후 유저 평가 종료
+                    # 조건 만족 → 등록 및 종료
                     if len(window_days) == 30 and avg_minutes >= 55:
                         cursor.execute("""
                             INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
                             VALUES (%s, %s, %s)
                         """, (uid, achievement_id, current_day.strftime("%Y-%m-%d")))
                         conn.commit()
+                        new_awards[str(uid)] = current_day.strftime("%Y-%m-%d")
                         if verbose:
                             print(f"[유저 {uid}] ▶ 도전과제 '파인튜닝' 달성 후 평가 종료\n")
-                        break  # 유저에 대해 추가 평가 중단
+                        break  # 유저 평가 중단
 
                 if verbose:
-                    print()  # 유저 구분용 개행
+                    print()
 
-    finally:
-        conn.close()
+            fine_cache.update(new_awards)
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 예외 발생: {e}")
+
+#엣지오브투머로우: 3일 연속 동일한 5곡
+def award_edge_of_tomorrow(conn):
+    """
+    '엣지오브투머로우' 도전과제:
+    3일 연속, 동일한 5곡을 동일한 순서로 플레이하면 달성.
+    단, 각 날짜 내 어디든 연속으로 등장하면 인정.
+    """
+
+    def extract_sequences(title_list, length=5):
+        return [tuple(title_list[i:i+length]) for i in range(len(title_list) - length + 1)]
+
+    cache = load_achievement_cache()
+    edge_cache = ensure_achievement_key(cache, "엣지오브투머로우")
+
+    try:
+        sync_cache_to_db(cache, "엣지오브투머로우", conn)
+
+        with conn.cursor() as cursor:
+            # 1️⃣ 도전과제 ID 조회
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = '엣지오브투머로우'")
+            result = cursor.fetchone()
+            if not result:
+                print("[ERROR] '엣지오브투머로우' 도전과제가 존재하지 않습니다.")
+                return
+            achievement_id = result[0]
+
+            # 2️⃣ music_play 기록 있는 유저 중 캐시에 없는 유저만 추림
+            cursor.execute("SELECT DISTINCT user_id FROM music_play")
+            all_users = [row[0] for row in cursor.fetchall()]
+            target_users = [uid for uid in all_users if str(uid) not in edge_cache]
+
+            new_awards = {}
+
+            for uid in target_users:
+                cursor.execute("""
+                    SELECT DATE(played_at), title
+                    FROM music_play
+                    WHERE user_id = %s
+                    ORDER BY played_at
+                """, (uid,))
+                rows = cursor.fetchall()
+
+                if not rows:
+                    continue
+
+                daily_titles = defaultdict(list)
+                for date, title in rows:
+                    daily_titles[date].append(title)
+
+                sorted_days = sorted(daily_titles.keys())
+                if len(sorted_days) < 3:
+                    continue
+
+                for i in range(len(sorted_days) - 2):
+                    d1, d2, d3 = sorted_days[i:i+3]
+                    if d2 != d1 + timedelta(days=1) or d3 != d2 + timedelta(days=1):
+                        continue
+
+                    l1, l2, l3 = daily_titles[d1], daily_titles[d2], daily_titles[d3]
+                    if len(l1) < 5 or len(l2) < 5 or len(l3) < 5:
+                        continue
+
+                    s1 = set(extract_sequences(l1))
+                    s2 = set(extract_sequences(l2))
+                    s3 = set(extract_sequences(l3))
+
+                    common = s1 & s2 & s3
+                    if common:
+                        achieved_at = d3.strftime("%Y-%m-%d")
+                        cursor.execute("""
+                            INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                            VALUES (%s, %s, %s)
+                        """, (uid, achievement_id, achieved_at))
+                        conn.commit()
+
+                        edge_cache[str(uid)] = achieved_at
+                        print(f"[유저 {uid}] ▶ '엣지오브투머로우' 달성! (공통 시퀀스: {common.pop()} | 날짜: {achieved_at})")
+                        break  # 한 번 달성 시 평가 종료
+
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 예외 발생: {e}")
+
+#도원결의: 전달 플레이 3개 동일하게
+def award_dowon_pledge(conn):
+    """
+    '도원결의' 도전과제:
+    전날 누군가가 연속으로 재생한 3곡과 동일한 3곡을,
+    다음날 누군가가 동일 순서로 연속 재생하면 달성.
+    """
+
+    cache = load_achievement_cache()
+    dowon_cache = ensure_achievement_key(cache, "도원결의")
+
+    try:
+        sync_cache_to_db(cache, "도원결의", conn)
+
+        with conn.cursor() as cursor:
+            # 1️⃣ 도전과제 ID 조회
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = '도원결의'")
+            result = cursor.fetchone()
+            if not result:
+                print("[ERROR] '도원결의' 도전과제가 존재하지 않습니다.")
+                return
+            achievement_id = result[0]
+
+            # 2️⃣ 이미 달성한 유저는 캐시 기준으로 필터링
+            achieved_users = set(dowon_cache.keys())
+
+            # 3️⃣ 날짜 리스트 조회
+            cursor.execute("SELECT DISTINCT DATE(played_at) AS day FROM music_play ORDER BY day")
+            all_days = [row[0] for row in cursor.fetchall()]
+
+            new_awards = {}
+
+            for i in range(1, len(all_days)):
+                prev_day = all_days[i - 1]
+                curr_day = all_days[i]
+
+                # 전날 연속 3곡 시퀀스 수집
+                cursor.execute("""
+                    SELECT user_id, played_at, title
+                    FROM music_play
+                    WHERE DATE(played_at) = %s
+                    ORDER BY user_id, played_at
+                """, (prev_day,))
+                rows = cursor.fetchall()
+
+                prev_sequences = set()
+                user_tracks = defaultdict(list)
+                for uid, _, title in rows:
+                    user_tracks[uid].append(title)
+                for track_list in user_tracks.values():
+                    for j in range(len(track_list) - 2):
+                        prev_sequences.add(tuple(track_list[j:j+3]))
+                if not prev_sequences:
+                    continue
+
+                # 당일 유저의 시퀀스 검사
+                cursor.execute("""
+                    SELECT user_id, played_at, title
+                    FROM music_play
+                    WHERE DATE(played_at) = %s
+                    ORDER BY user_id, played_at
+                """, (curr_day,))
+                rows = cursor.fetchall()
+
+                today_tracks = defaultdict(list)
+                for uid, _, title in rows:
+                    today_tracks[uid].append(title)
+
+                for uid, track_list in today_tracks.items():
+                    if str(uid) in dowon_cache or len(track_list) < 3:
+                        continue
+
+                    for j in range(len(track_list) - 2):
+                        seq = tuple(track_list[j:j+3])
+                        if seq in prev_sequences:
+                            achieved_at = curr_day.strftime("%Y-%m-%d")
+                            cursor.execute("""
+                                INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                                VALUES (%s, %s, %s)
+                            """, (uid, achievement_id, achieved_at))
+                            conn.commit()
+                            dowon_cache[str(uid)] = achieved_at
+                            print(f"[유저 {uid}] ▶ '도원결의' 달성! ({achieved_at})")
+                            break
+
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 예외 발생: {e}")
 
 
 
-START_DAY = '2025-05-12'
-print("확인: 인싸")
-award_inssa_achievement_from_date(START_DAY, config_path="config.json")
-print("확인: 칠가이")
-award_chill_guy_achievement("config.json")
-print("확인: 과몰입")
-award_over_immersed_achievement_from_date(START_DAY, config_path="config.json")
-print("확인: 완장")
-award_captain_achievement_from_date(START_DAY, config_path="config.json")
-print("확인: 최애숭배")
-award_favorite_song_achievement("config.json")
-print("확인: 39")
-award_39_achievement("config.json")
-print("확인: 파인튜닝")
-award_finetuning_achievement("config.json")
+
+
+
+
+# 📌 DB 연결
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    config = json.load(f)
+    db_conf = config["db"]
+    db_params = {
+        "host": db_conf["host"],
+        "port": db_conf["port"],
+        "user": db_conf["user"],
+        "password": db_conf["password"],
+        "db": db_conf["database"],
+        "charset": "utf8mb4"
+    }
+
+conn = pymysql.connect(**db_params)
+
+try:
+    with conn.cursor() as cursor:
+        print("확인: 인싸")
+        award_inssa_achievement_from_date(START_DAY, conn)
+        print("확인: 칠가이")
+        award_chill_guy_achievement(conn)
+        print("확인: 과몰입")
+        award_over_immersed_achievement_from_date(START_DAY, conn)
+        print("확인: 완장")
+        award_captain_achievement_from_date(START_DAY, conn)
+        print("확인: 최애숭배")
+        award_favorite_song_achievement(conn)
+        print("확인: 39")
+        award_39_achievement(conn)
+        print("확인: 파인튜닝")
+        award_finetuning_achievement(conn)
+        print("확인: 엣지오브투머로우")
+        award_edge_of_tomorrow(conn)
+        print("확인: 도원결의")
+        award_dowon_pledge(conn)
+except Exception as e:
+    import traceback
+    print(f"[FATAL] 실행 중 예외 발생: {e}")
+    traceback.print_exc()
+finally:
+    try:
+        if conn and conn.open:
+            conn.close()
+    except Exception:
+        pass

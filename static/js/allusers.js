@@ -71,12 +71,32 @@ document.addEventListener("mousemove", (e) => {
 export async function renderAllusersPage() {
     const app = document.getElementById("app");
     if (!app) return;
-
     app.innerHTML = `
-        <h1 class="text-2xl font-bold mb-6">모든 유저 목록</h1>
-        <div id="user-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6 relative"></div>
-        <div id="hover-card" class="fixed z-50 hidden pointer-events-none bg-transparent" style="left: 0; top: 0;"></div>
+        <h1 class="text-2xl font-bold mb-4 text-center">모든 유저 목록</h1>
+
+        <div class="px-4 md:px-8">
+            <!-- ✅ 유저 카드 영역 먼저 -->
+            <div id="user-list"
+                class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-20 relative mb-20">
+            </div>
+
+            <!-- ✅ 그 아래 배너 이미지 -->
+            <div class="w-full">
+                <!--<a href="https://vrcimg.hatsune.app" target="_blank" rel="noopener noreferrer">-->
+                    <img src="https://vrcimg.hatsune.app/jd.png"
+                        alt="유저 배너"
+                        class="w-full rounded-xl shadow-lg object-cover transition duration-300
+                                hover:brightness-110 hover:shadow-[0_0_15px_rgba(59,130,246,0.6)]">
+                    </div>
+                <!--</a>-->
+        </div>
+
+        <div id="hover-card"
+            class="fixed z-50 hidden pointer-events-none bg-transparent"
+            style="left: 0; top: 0;">
+        </div>
     `;
+
 
     const res = await fetch("/api/all-users");
     const users = await res.json();
@@ -88,10 +108,12 @@ export async function renderAllusersPage() {
         el.className = `user-box bg-white dark:bg-gray-800 text-gray-900 dark:text-white \
           rounded-xl shadow p-4 text-center cursor-pointer transition hover:scale-105`;
         el.innerHTML = `
-          <img src="${user.img}" alt="${user.nickname}" 
-               class="w-20 h-20 rounded-full object-cover mx-auto mb-2 border border-gray-300 dark:border-gray-500">
-          <div class="font-semibold">${user.nickname}</div>
-        `;
+            <div class="aspect-square w-full relative rounded-xl overflow-hidden border border-gray-300 dark:border-gray-600">
+                <img src="${user.img}" alt="${user.nickname}" 
+                    class="absolute inset-0 w-full h-full object-cover">
+            </div>
+            <div class="font-semibold mt-2 truncate">${user.nickname}</div>
+            `;
 
         el.addEventListener("mouseenter", async (e) => {
             try {
@@ -115,7 +137,7 @@ export async function renderAllusersPage() {
                                 ${ach.name} (${ach.achieved_at})
                             </div>
                             <div class="mt-2 flex flex-col gap-1">
-                                ${ach.description.split(",").map((part, i) => `
+                                ${ach.description.split(",,,").map((part, i) => `
                                     <div class="text-[11px] leading-snug ${i > 0 ? 'italic' : ''} text-blue-${i > 0 ? '500' : '400'} dark:text-blue-${i > 0 ? '500' : '400'}">
                                         ${part.trim()}
                                     </div>
@@ -141,26 +163,34 @@ export async function renderAllusersPage() {
                 hoverCard.innerHTML = `
                 <div class="bg-blue-100 dark:bg-blue-950 text-sm text-gray-800 dark:text-white 
                             border border-blue-300 dark:border-blue-700 
-                            p-4 rounded-xl shadow-xl w-80">
-                    <img src="${safe(user.img, '/static/profiles/default.png')}" alt="${safe(user.nickname)} 프로필"
-                        class="w-16 h-16 rounded-full object-cover border border-gray-300 dark:border-gray-600 shadow-sm">
-                    <div class="flex-1 mt-2">
+                            rounded-xl shadow-xl w-80 overflow-hidden">
+                    
+                    <!-- ✅ 이미지가 카드 상단에 딱 붙도록 -->
+                    <div class="w-full h-24">
+                        <img src="${safe(user.img, '/static/profiles/default.png')}" alt="${safe(user.nickname)} 프로필"
+                            class="w-full h-full object-cover object-[center_60%]">
+                    </div>
+
+                    <!-- ✅ 본문 padding은 여기서 시작 -->
+                    <div class="p-4">
                         <div class="text-lg font-semibold text-gray-800 dark:text-white">${safe(user.nickname)}</div>
                         <div class="text-gray-600 dark:text-gray-300 text-sm">${safe(user.comment)}</div>
+                        
+                        <div class="flex space-x-2 mt-2">
+                            ${achHtml}
+                            ${showMoreHtml}
+                        </div>
+
+                        <div class="text-right text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap mt-2">
+                            <div>누적 출석: <span class="font-medium text-gray-800 dark:text-white">${safe(user.total_count)}회</span></div>
+                            <div>총 플레이: <span class="font-medium text-gray-800 dark:text-white">${safe(playTime)}</span></div>
+                            <div class="text-xs">마지막 접속: ${safe(user.last_attended)}</div>
+                        </div>
+
+                        <canvas id="hoverChart" width="280" height="60" class="mt-4"></canvas>
                     </div>
-                    <div class="flex space-x-2 mt-2">
-                        ${achHtml}
-                        ${showMoreHtml}
-                    </div>
-                    <div class="text-right text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap mt-2">
-                        <div>누적 출석: <span class="font-medium text-gray-800 dark:text-white">${safe(user.total_count)}회</span></div>
-                        <div>총 플레이: <span class="font-medium text-gray-800 dark:text-white">${safe(playTime)}</span></div>
-                        <div class="text-xs">마지막 접속: ${safe(user.last_attended)}</div>
-                    </div>
-                    <canvas id="hoverChart" width="280" height="60" class="mt-4"></canvas>
                 </div>
                 `;
-
 
 
                 hoverCard.style.display = "block";

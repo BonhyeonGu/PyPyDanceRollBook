@@ -8,12 +8,13 @@ import os
 
 class PyPyDanceLogAnalyzer:
     def __init__(self, log_file_path: str, room_name: str = "PyPyDance", min_minutes: int = 30,
-                 youtube_api_key: str = "", consented_users: list[str] = None):
+                 youtube_api_key: str = "", consented_users: list[str] = None, baned_songs: list[str] = None):
         self.log_file_path = log_file_path
         self.room_name = room_name
         self.min_duration = timedelta(minutes=min_minutes)
         self.youtube_api_key = youtube_api_key
         self.consented_users = set(consented_users) if consented_users else set()
+        self.baned_songs = set(baned_songs) if baned_songs else set()
 
         # 정규식 패턴
         self.enter_room_pattern = re.compile(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2} .*?Entering Room: " + re.escape(self.room_name))
@@ -167,6 +168,16 @@ class PyPyDanceLogAnalyzer:
 
             title = title.strip()
             user = user.strip(")")
+
+
+            skip = False
+            for banded_song in self.baned_songs:
+                if banded_song.lower() in title.lower() or banded_song.lower() in url.lower():
+                    #print(f"[WARN] 금지된 노래 발견: {title} ({url})")
+                    skip = True
+                    break
+            if skip:
+                continue
 
             # 동의 사용자 검사
             if self.consented_users and user not in self.consented_users:

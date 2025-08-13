@@ -15,54 +15,64 @@ export async function initMain() {
     // 🔸 콘텐츠는 처음에 비가시 상태로 삽입됨
     app.innerHTML = `
     <div id="main-content" class="opacity-0 translate-y-2 transition-all duration-500">
-      <div class="flex justify-between items-center mb-4">
+    <div class="flex justify-between items-start mb-4">
         <h1 class="text-xl font-bold">출석 랭킹</h1>
-        <button id="rankingModeBtn" class="text-sm px-3 py-1 rounded bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 transition">
-          🗓️ 주간 랭킹
-        </button>
-      </div>
-      <div id="ranking-list" class="space-y-4 mt-8"></div>
 
-      <div class="mt-16">
+        <div class="flex flex-col items-end space-y-1">
+        <button id="rankingModeBtn" class="text-sm px-3 py-1 rounded bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 transition">
+            🗓️ 주간 랭킹
+        </button>
+        <div class="flex items-center gap-2" id="rankingOffsetControls">
+            <button id="rankingPrevBtn" class="text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition">⬅ 이전</button>
+            <span id="rankingOffsetLabel" class="text-xs text-gray-600 dark:text-gray-300">이번 주</span>
+            <button id="rankingNextBtn" class="text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition">다음 ➡</button>
+        </div>
+        </div>
+    </div>
+
+    <div id="ranking-list" class="space-y-4 mt-8"></div>
+
+    <div class="mt-16">
         <div class="flex justify-between items-center mb-4">
-          <h2 class="text-xl font-bold">히든 스타</h2>
-          <button id="refreshThanksBtn" class="text-sm px-3 py-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+        <h2 class="text-xl font-bold">히든 스타</h2>
+        <button id="refreshThanksBtn" class="text-sm px-3 py-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition">
             🔄
-          </button>
+        </button>
         </div>
         <div id="thanks-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-      </div>
+    </div>
 
-      <div class="mt-16">
-        <h2 class="text-xl font-bold mb-4">최근 인기곡 (7 days)</h2>
+    <div class="mt-16">
+        <h2 class="text-xl font-bold mb-4">최근 인기곡 (30 days)</h2>
         <div id="popular-music" class="grid grid-cols-2 md:grid-cols-5 gap-4"></div>
-      </div>
+    </div>
 
-      <div class="mt-16">
+    <div class="mt-16">
         <h2 class="text-xl font-bold mb-2">유저 검색</h2>
         <div class="flex space-x-2">
-          <input id="searchInput" type="text" placeholder="닉네임 입력..." class="flex-1 border px-4 py-2 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 transition-colors duration-300" />
-          <button id="searchBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition">검색</button>
+        <input id="searchInput" type="text" placeholder="닉네임 입력..." class="flex-1 border px-4 py-2 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 transition-colors duration-300" />
+        <button id="searchBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition">검색</button>
         </div>
         <div id="searchResult" class="mt-4 mb-4"></div>
-      </div>
+    </div>
 
-      <div class="mt-16">
+    <div class="mt-16">
         <h2 class="text-xl font-semibold mb-4">날짜별 참여자 및 재생 음악 보기</h2>
         <input type="date" id="calendar" class="border px-4 py-2 rounded mb-4 bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600 transition-colors duration-300">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="day-results">
-          <div>
-            <h3 class="text-lg font-bold mb-2">참여자</h3>
+        <div>
+            <h3 class="text-lg font-bold mb-2">참여자 <span id="participant-count" class="text-gray-500 dark:text-gray-400">(0)</span></h3>
             <div id="participant-list" class="space-y-2"></div>
-          </div>
-          <div>
-            <h3 class="text-lg font-bold mb-2">음악</h3>
-            <div id="music-list" class="space-y-2"></div>
-          </div>
         </div>
-      </div>
+        <div>
+            <h3 class="text-lg font-bold mb-2">음악 <span id="music-count" class="text-gray-500 dark:text-gray-400">(0)</span></h3>
+            <div id="music-list" class="space-y-2"></div>
+        </div>
+        </div>
     </div>
-  `;
+    </div>
+    `;
+
 
     const searchBtn = document.getElementById("searchBtn");
     const searchInput = document.getElementById("searchInput");
@@ -97,7 +107,9 @@ export async function initMain() {
             calendarInput.value = `${yyyy}-${mm}-${dd}`;
 
             // 🔹 어제 날짜에 해당하는 데이터 자동 로딩
-            const fakeChangeEvent = { target: calendarInput };
+            const fakeChangeEvent = {
+                target: calendarInput
+            };
             setupCalendarEvent(); // 먼저 이벤트 바인딩
             calendarInput.dispatchEvent(new Event('change')); // change 이벤트 트리거
         }
@@ -111,7 +123,6 @@ export async function initMain() {
         console.error("초기화 실패:", err);
     }
 }
-
 
 const PROFILE_BASE = "/static/profiles";
 
@@ -147,7 +158,6 @@ function bindUserBoxEvents() {
     });
 }
 
-
 function showToast(message) {
     const toast = document.getElementById("copyToast");
     if (!toast) return;
@@ -177,7 +187,7 @@ function showToast(message) {
 
 //=================================================================================================================================
 
-async function renderRankingList(mode = "total") {
+async function renderRankingList(mode = "total", offset = 0) {
     const container = document.getElementById("ranking-list");
 
     // 🔸 현재 높이 기억
@@ -192,8 +202,14 @@ async function renderRankingList(mode = "total") {
     container.style.opacity = "1";
 
     try {
-        const res = await fetch(`/api/ranking-users?mode=${mode}`);
-        const users = await res.json();
+        const res = await fetch(`/api/ranking-users?mode=${mode}&offset=${offset}`);
+        const data = await res.json();
+        const { users, start_date, end_date } = data;
+
+        // ✅ 이 줄을 추가
+        updateRankingOffsetLabel(start_date, end_date);
+
+
 
         // 🔸 순위 값 직접 부여
         users.forEach((u, i) => u.rank = i + 1);
@@ -223,7 +239,7 @@ async function renderRankingList(mode = "total") {
                 hover:shadow-lg transition-colors duration-300
             `;
             userBox.dataset.nickname = user.nickname;
-            userBox.dataset.userId = user.user_id;  // ✅ 히든 스타 제외 처리를 위한 ID 속성 추가
+            userBox.dataset.userId = user.user_id; // ✅ 히든 스타 제외 처리를 위한 ID 속성 추가
 
             const maxAchievements = 3;
             const shown = user.achievements.slice(0, maxAchievements);
@@ -243,7 +259,7 @@ async function renderRankingList(mode = "total") {
                             ${ach.name} (${ach.achieved_at})
                         </div>
                         <div class="mt-2 flex flex-col gap-1">
-                            ${ach.description.split(",").map((part, i) => `
+                            ${ach.description.split(",,,").map((part, i) => `
                                 <div class="text-[11px] leading-snug ${i > 0 ? 'italic' : ''} text-blue-${i > 0 ? '500' : '400'} dark:text-blue-${i > 0 ? '500' : '400'}">
                                     ${part.trim()}
                                 </div>
@@ -296,11 +312,8 @@ async function renderRankingList(mode = "total") {
     }
 }
 
-
-
-
-
 let rankingMode = "weekly";
+let rankingOffset = 0;
 const rankingModes = ["weekly", "monthly", "total"];
 const rankingModeLabels = {
     weekly: "🗓️ 주간 랭킹",
@@ -308,45 +321,75 @@ const rankingModeLabels = {
     total: "🏆 누적 랭킹"
 };
 
-function setupRankingModeButton() {
-    const btn = document.getElementById("rankingModeBtn");
-    if (!btn) return;
+function updateRankingOffsetLabel(startDate, endDate) {
+    const label = document.getElementById("rankingOffsetLabel");
+    const controls = document.getElementById("rankingOffsetControls");
 
-    btn.addEventListener("click", async () => {
-        const content = document.getElementById("main-content");
+    if (!label || !controls) return;
 
-        // 🔸 전환 애니메이션 시작
-        if (content) {
-            content.classList.add("opacity-0", "translate-y-2");
-            await new Promise(resolve => setTimeout(resolve, 300));
-        }
+    let offsetText = "";
 
-        const nextIndex = (rankingModes.indexOf(rankingMode) + 1) % rankingModes.length;
-        rankingMode = rankingModes[nextIndex];
-        btn.textContent = rankingModeLabels[rankingMode];
+    if (rankingMode === "weekly") {
+        offsetText = rankingOffset === 0 ? "이번 주" : `${rankingOffset}주 전`;
+        controls.style.visibility = "visible";
+        controls.style.pointerEvents = "auto";
+    } else if (rankingMode === "monthly") {
+        offsetText = rankingOffset === 0 ? "이번 달" : `${rankingOffset}달 전`;
+        controls.style.visibility = "visible";
+        controls.style.pointerEvents = "auto";
+    } else {
+        offsetText = "전체 랭킹";
+        controls.style.visibility = "hidden";      // 🔸 공간은 유지
+        controls.style.pointerEvents = "none";     // 🔸 클릭 안됨
+    }
 
-        // ✅ 리셋
-        if (refreshBtn) {
-            refreshBtn.disabled = false;
-            refreshBtn.textContent = "🔄";
-        }
-
-        excludedUserIds = new Set();
-        const rankingUsers = await renderRankingList(rankingMode);
-        const excludedIds = rankingUsers.map(u => u.user_id);
-        excludedUserIds = new Set(excludedIds);
-
-        await loadInitialThanksUsers(excludedIds, rankingMode);
-
-        // 🔸 전환 애니메이션 종료
-        if (content) {
-            content.classList.remove("opacity-0", "translate-y-2");
-            content.classList.add("opacity-100", "translate-y-0");
-        }
-    });
+    if (rankingMode === "weekly" || rankingMode === "monthly") {
+        label.textContent = `${startDate} ~ ${endDate} (${offsetText})`;
+    } else {
+        label.textContent = offsetText;
+    }
 }
 
 
+function setupRankingModeButton() {
+    const modeBtn = document.getElementById("rankingModeBtn");
+
+    if (!modeBtn) return;
+
+    modeBtn.addEventListener("click", async () => {
+        const currentIndex = rankingModes.indexOf(rankingMode);
+        const nextIndex = (currentIndex + 1) % rankingModes.length;
+        rankingMode = rankingModes[nextIndex];
+        rankingOffset = 0;
+
+        modeBtn.textContent = rankingModeLabels[rankingMode];
+
+        const rankingUsers = await renderRankingList(rankingMode, rankingOffset);
+        excludedUserIds = new Set(rankingUsers.map(u => u.user_id));
+        await loadInitialThanksUsers([...excludedUserIds], rankingMode);
+    });
+
+    const prevBtn = document.getElementById("rankingPrevBtn");
+    const nextBtn = document.getElementById("rankingNextBtn");
+
+    if (prevBtn && nextBtn) {
+        prevBtn.addEventListener("click", async () => {
+            rankingOffset += 1;
+            const rankingUsers = await renderRankingList(rankingMode, rankingOffset);
+            excludedUserIds = new Set(rankingUsers.map(u => u.user_id));
+            await loadInitialThanksUsers([...excludedUserIds], rankingMode);
+        });
+
+        nextBtn.addEventListener("click", async () => {
+            if (rankingOffset > 0) {
+                rankingOffset -= 1;
+                const rankingUsers = await renderRankingList(rankingMode, rankingOffset);
+                excludedUserIds = new Set(rankingUsers.map(u => u.user_id));
+                await loadInitialThanksUsers([...excludedUserIds], rankingMode);
+            }
+        });
+    }
+}
 
 
 //=================================================================================================================================
@@ -357,13 +400,12 @@ let refreshBtn = null;
 function renderThanksUsers(users) {
     const container = document.getElementById("thanks-list");
     container.innerHTML = "";
-
     users.forEach(user => {
         const box = document.createElement("div");
         box.className = `
-      user-box bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center justify-between space-x-4
-      hover:shadow-lg transition-colors duration-300
-    `.trim();
+            user-box bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex items-center justify-between space-x-4
+            hover:shadow-lg transition-colors duration-300
+        `.trim();
         box.dataset.nickname = user.nickname;
         box.dataset.userId = user.user_id;
 
@@ -372,50 +414,35 @@ function renderThanksUsers(users) {
         const restCount = user.achievements.length - maxAchievements;
 
         const achievementsHtml = shown.map(ach => `
-      <div class="relative group">
-        <img src="/static/achievements/a_${ach.name}.png" alt="${ach.name} 아이콘"
-          class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-pointer">
-        <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2
-                    bg-blue-100 dark:bg-blue-950 text-gray-800 dark:text-white text-xs px-4 py-3 rounded-xl
-                    border border-blue-300 dark:border-blue-700 shadow-lg
-                    opacity-0 group-hover:opacity-100 transition-opacity duration-200
-                    pointer-events-none z-50 text-center min-w-[20rem] max-w-[26rem] whitespace-normal">
-          <div class="font-bold text-blue-900 dark:text-blue-300 text-xs">${ach.name} (${ach.achieved_at})</div>
-          <div class="mt-2 flex flex-col gap-1">
-            ${ach.description.split(",").map((part, idx) => `
-              <div class="text-[11px] leading-snug ${idx > 0 ? 'italic' : ''} text-blue-${idx === 0 ? '400' : '500'} dark:text-blue-${idx === 0 ? '400' : '500'}">
-                ${part.trim()}
-              </div>
-            `).join("")}
-          </div>
-        </div>
-      </div>
-    `).join("");
+            <img src="/static/achievements/a_${ach.name}.png" alt="${ach.name} 아이콘"
+                class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600" />
+        `).join("");
+
 
         const showMoreHtml = restCount > 0 ? `
-      <div class="w-8 h-8 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded text-sm text-gray-600 dark:text-gray-300">
-        +${restCount}
-      </div>
-    ` : "";
+            <div class="w-8 h-8 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded text-sm text-gray-600 dark:text-gray-300">
+                +${restCount}
+            </div>
+        ` : "";
 
         box.innerHTML = `
-      <img src="${user.img}" alt="${user.nickname} 프로필"
-          class="w-16 h-16 rounded-full object-cover border border-gray-300 dark:border-gray-600 shadow-sm">
+            <img src="${user.img}" alt="${user.nickname} 프로필"
+                class="w-16 h-16 rounded-full object-cover border border-gray-300 dark:border-gray-600 shadow-sm">
 
-      <div class="flex-1">
-          <div class="text-lg font-semibold text-gray-800 dark:text-white">${user.nickname}</div>
-          <div class="text-gray-500 dark:text-gray-300 text-sm">${user.comment || '한줄 소개 없음'}</div>
-          <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">누적 출석: ${user.total_count}회</div>
-          <div class="text-xs text-gray-600 dark:text-gray-300">마지막 접속: ${user.last_attended}</div>
-      </div>
+            <div class="flex-1">
+                <div class="text-lg font-semibold text-gray-800 dark:text-white">${user.nickname}</div>
+                <div class="text-gray-500 dark:text-gray-300 text-sm">${user.comment || '한줄 소개 없음'}</div>
+                <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">누적 출석: ${user.total_count}회</div>
+                <div class="text-xs text-gray-600 dark:text-gray-300">마지막 접속: ${user.last_attended}</div>
+            </div>
 
-      <div class="flex flex-wrap gap-2 ml-4">
-        ${achievementsHtml}
-        ${showMoreHtml}
-      </div>
-    `;
+            <div class="flex flex-wrap gap-2 ml-4">
+                ${achievementsHtml}
+                ${showMoreHtml}
+            </div>
+        `;
 
-        // ✅ 애니메이션 효과 직접 스타일로 적용
+        // 애니메이션 효과 직접 스타일로 적용
         box.style.opacity = "0";
         box.style.transform = "translateY(0.5rem)";
         box.style.transition = "opacity 0.4s ease, transform 0.4s ease";
@@ -425,6 +452,7 @@ function renderThanksUsers(users) {
         box.style.opacity = "1";
         box.style.transform = "translateY(0)";
     });
+
     setTimeout(() => {
         bindUserBoxEvents();
     }, 400); // transition과 동일 시간
@@ -481,8 +509,6 @@ function setupRefreshThanksButton() {
 }
 
 //=================================================================================================================================
-
-
 
 //인기노래
 async function renderPopularMusic() {
@@ -547,8 +573,12 @@ function setupCalendarEvent() {
 
         const pList = document.getElementById("participant-list");
         const mList = document.getElementById("music-list");
+        const pCount = document.getElementById("participant-count");
+        const mCount = document.getElementById("music-count");
         pList.innerHTML = "";
         mList.innerHTML = "";
+        if (pCount) pCount.textContent = `(${participants.length})`;
+        if (mCount) mCount.textContent = `(${musics.length})`;
 
         if (participants.length === 0) {
             pList.innerHTML = "<div class='text-sm text-gray-500 dark:text-gray-400'>참여자가 없습니다.</div>";
@@ -641,8 +671,6 @@ function setupCalendarEvent() {
         }
     });
 }
-
-
 
 //=================================================================================================================================
 
@@ -744,7 +772,7 @@ async function searchUser() {
             const achDiv = document.createElement("div");
             achDiv.className = "relative group";
 
-            const descLines = (ach.description || "").split(",").map(part => part.trim());
+            const descLines = (ach.description || "").split(",,,").map(part => part.trim());
             const descHtml = descLines.map((line, i) =>
                 `<div class="text-[13px] leading-snug ${i === 0 ? "text-blue-800 dark:text-blue-400" : "italic text-blue-800 dark:text-blue-500"}">${line}</div>`
             ).join("");

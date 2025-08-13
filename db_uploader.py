@@ -151,7 +151,8 @@ def run_analysis(config):
             room_name=config.get("room_name", "PyPyDance"),
             min_minutes=config.get("min_minutes", 30),
             youtube_api_key=config.get("youtube_api_key", ""),
-            consented_users=consented_users
+            consented_users=consented_users,
+            baned_songs=config.get("baned_songs", [])
         )
 
         analyzer._lines_override = new_lines

@@ -19,7 +19,7 @@ export async function renderAchievementsPage() {
     container.innerHTML = "";
 
     achievements.forEach(ach => {
-      const descLines = (ach.description || "").split(",").map(line => line.trim());
+      const descLines = (ach.description || "").split(",,,").map(line => line.trim());
 
       const descHtml = descLines.map((line, i) => `
         <div class="${i === 0 ? "text-[15px] font-medium text-gray-800 dark:text-gray-100" : "text-[14px] italic text-gray-600 dark:text-gray-300"}">

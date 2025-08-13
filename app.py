@@ -10,6 +10,8 @@ from collections import defaultdict
 import math
 import numpy as np
 
+from urllib.parse import quote
+
 
 app = Flask(__name__)
 
@@ -90,8 +92,13 @@ def refresh_stats():
 
     return jsonify({"status": "refreshed", "updated": updated})
 
-#---------------------------------------------------------------------------------------
 
+def safe_filename(nickname):
+    return nickname.replace("/", "_SLASH_").replace("⁄", "_SLASH_")
+
+
+#---------------------------------------------------------------------------------------
+'''
 def compute_ranking(mode: str):
     conn = pymysql.connect(**DB_CONFIG)
     try:
@@ -166,6 +173,101 @@ def update_ranking_users_cache():
         for mode in ["total", "weekly", "monthly"]:
             cache_store["ranking_users"][mode] = compute_ranking(mode)
 
+'''
+
+def compute_ranking(mode: str, offset: int = 0):
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            today = datetime.today()
+            start_str = ""
+            end_str = ""
+
+            if mode == "weekly":
+                start_of_week = today - timedelta(days=today.weekday(), weeks=offset)
+                end_of_week = start_of_week + timedelta(days=6)
+
+                start_str = start_of_week.strftime("%Y-%m-%d 00:00:00")
+                end_str = end_of_week.strftime("%Y-%m-%d 23:59:59")
+
+                cursor.execute("""
+                    SELECT u.nickname, COUNT(*) AS count
+                    FROM attendance a
+                    JOIN users u ON u.user_id = a.user_id
+                    WHERE a.enter_time BETWEEN %s AND %s
+                    GROUP BY u.user_id
+                    ORDER BY count DESC
+                    LIMIT 10
+                """, (start_str, end_str))
+
+            elif mode == "monthly":
+                target_month = today.month - offset
+                target_year = today.year
+                while target_month <= 0:
+                    target_month += 12
+                    target_year -= 1
+
+                start_of_month = datetime(target_year, target_month, 1)
+                if target_month == 12:
+                    next_month = datetime(target_year + 1, 1, 1)
+                else:
+                    next_month = datetime(target_year, target_month + 1, 1)
+
+                start_str = start_of_month.strftime("%Y-%m-%d 00:00:00")
+                end_str = (next_month - timedelta(days=1)).strftime("%Y-%m-%d 23:59:59")
+
+                cursor.execute("""
+                    SELECT u.nickname, COUNT(*) AS count
+                    FROM attendance a
+                    JOIN users u ON u.user_id = a.user_id
+                    WHERE a.enter_time BETWEEN %s AND %s
+                    GROUP BY u.user_id
+                    ORDER BY count DESC
+                    LIMIT 10
+                """, (start_str, end_str))
+
+            else:  # total
+                cursor.execute("""
+                    SELECT u.nickname, uas.total_count
+                    FROM user_attendance_summary uas
+                    JOIN users u ON u.user_id = uas.user_id
+                    ORDER BY uas.total_count DESC, uas.last_attended DESC
+                    LIMIT 10
+                """)
+
+            rows = cursor.fetchall()
+            users = []
+            for rank, row in enumerate(rows, start=1):
+                nickname = row[0]
+                count = row[1] if len(row) > 1 else None
+                info = get_user_info_by_nickname(cursor, nickname)
+                if info:
+                    info["rank"] = rank
+                    if count is not None:
+                        info["total_count"] = count
+                    users.append(info)
+
+            # ✅ 날짜 범위는 date만 잘라서 반환 (프론트가 포맷 꾸미기 편하게)
+            return {
+                "users": users,
+                "start_date": start_str.split(" ")[0] if start_str else "",
+                "end_date": end_str.split(" ")[0] if end_str else ""
+            }
+    finally:
+        conn.close()
+
+
+@app.route("/api/ranking-users")
+def ranking_users():
+    mode = request.args.get("mode", "total")
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+
+    return jsonify(compute_ranking(mode, offset))
+
+
 #---------------------------------------------------------------------------------------
 
 def compute_popular_music():
@@ -175,7 +277,8 @@ def compute_popular_music():
             cursor.execute("""
                 SELECT title, COUNT(*) AS play_count
                 FROM music_play
-                WHERE played_at >= NOW() - INTERVAL 7 DAY
+                WHERE played_at >= CURDATE() - INTERVAL 30 DAY
+                    AND played_at < CURDATE()
                 GROUP BY title
                 ORDER BY play_count DESC, MAX(played_at) DESC
                 LIMIT 10
@@ -293,7 +396,7 @@ def participants_by_date():
         leave_time = r[4]
         duration_min = int((leave_time - enter_time).total_seconds() // 60)
 
-        img_filename = f"{nickname}.png"
+        img_filename = safe_filename(nickname) + ".png"
         img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
         if not os.path.exists(img_path):
             img_filename = PROFILE_DEFAULT_FILENAME
@@ -606,14 +709,14 @@ def compute_love_graph():
             # 노드 목록
             nodes = []
             for nick in sorted(connected_nicks):
-                img_filename = f"{nick}.png"
+                img_filename = safe_filename(nick) + ".png"
                 img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
                 if not os.path.exists(img_path):
                     img_filename = PROFILE_DEFAULT_FILENAME
                 nodes.append({
                     "id": nick,
                     "nickname": nick,
-                    "img": f"/static/profiles/{img_filename}"
+                    "img": f"/static/profiles/{quote(img_filename)}"
                 })
 
             return {"nodes": nodes, "links": links}
@@ -657,7 +760,7 @@ def get_user_info_by_nickname(cursor, nickname):
     ]
 
     # 프로필 이미지
-    img_filename = f"{nickname}.png"
+    img_filename = img_filename = safe_filename(nickname) + ".png"
     img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
     if not os.path.exists(img_path):
         img_filename = PROFILE_DEFAULT_FILENAME

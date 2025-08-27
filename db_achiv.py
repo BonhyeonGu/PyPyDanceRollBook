@@ -754,8 +754,178 @@ def award_dowon_pledge(conn):
     except Exception as e:
         print(f"[ERROR] 처리 중 예외 발생: {e}")
 
+#마이웨이: 3-9명 6번
+def award_myway_achievement(conn):
+    cache = load_achievement_cache()
+    myway_cache = ensure_achievement_key(cache, "마이웨이")
+
+    try:
+        sync_cache_to_db(cache, "마이웨이", conn)
+
+        with conn.cursor() as cursor:
+            # 1️⃣ 도전과제 ID 조회
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = '마이웨이'")
+            result = cursor.fetchone()
+            if not result:
+                print("[ERROR] '마이웨이' 도전과제가 존재하지 않습니다.")
+                return
+            achievement_id = result[0]
+
+            # 2️⃣ 전체 유저 조회
+            cursor.execute("SELECT DISTINCT user_id FROM attendance")
+            all_users = [row[0] for row in cursor.fetchall()]
+
+            # 3️⃣ DB에서 이미 달성한 유저
+            cursor.execute("""
+                SELECT user_id FROM user_achievements
+                WHERE achievement_id = %s
+            """, (achievement_id,))
+            already_awarded = {row[0] for row in cursor.fetchall()}
+
+            # 4️⃣ 캐시 + DB 모두에 없는 유저만 필터링
+            target_users = [
+                uid for uid in all_users
+                if str(uid) not in myway_cache and uid not in already_awarded
+            ]
+
+            new_awards = {}
+
+            # 5️⃣ 유저별로 조사
+            for uid in target_users:
+                cursor.execute("""
+                    SELECT DATE(a.enter_time) AS day, COUNT(DISTINCT a.user_id) AS attendee_count
+                    FROM attendance a
+                    WHERE DATE(a.enter_time) IN (
+                        SELECT DISTINCT DATE(enter_time)
+                        FROM attendance
+                        WHERE user_id = %s
+                    )
+                    GROUP BY day
+                    HAVING attendee_count BETWEEN 3 AND 9
+                    ORDER BY day
+                """, (uid,))
+                rows = cursor.fetchall()
+
+                # 참석한 날 중 인원 수를 기준으로 다양한 날 개수 확인
+                distinct_attendee_counts = set()
+                valid_days_log = []  # (day, attendee_count) 저장
+                latest_date = None
+
+                for day, count in rows:
+                    if count not in distinct_attendee_counts:
+                        distinct_attendee_counts.add(count)
+                        valid_days_log.append((day.strftime("%Y-%m-%d"), count))
+                        latest_date = day
+
+                if len(distinct_attendee_counts) >= 6:
+                    achieved_at = latest_date.strftime("%Y-%m-%d")
+                    cursor.execute("""
+                        INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                        VALUES (%s, %s, %s)
+                    """, (uid, achievement_id, achieved_at))
+                    conn.commit()
+                    new_awards[str(uid)] = achieved_at
+
+                    print(f"[INFO] 유저 {uid} - '마이웨이' 도전과제 달성! (최종날짜: {achieved_at})")
+                    print("        조건 만족 날짜 및 인원 수:")
+                    for day_str, cnt in valid_days_log:
+                        print(f"         - {day_str} ({cnt}명)")
+                else:
+                    print(f"[INFO] 유저 {uid} - 조건 불충족 ({len(distinct_attendee_counts)}종 인원 수)")
+
+            # 6️⃣ 캐시 저장
+            myway_cache.update(new_awards)
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 오류 발생: {e}")
 
 
+# 조별과제: 6명 이상 출석 && 6명 이상 2곡 이상 플레이
+def award_team_project_achievement(start_date_str: str, conn):
+    cache = load_achievement_cache()
+    team_cache = ensure_achievement_key(cache, "조별과제")
+
+    sync_cache_to_db(cache, "조별과제", conn)
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = '조별과제'")
+            result = cursor.fetchone()
+            if not result:
+                print("[ERROR] '조별과제' 도전과제가 존재하지 않습니다.")
+                return
+            achievement_id = result[0]
+
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            today = datetime.today().date()
+            current_date = start_date
+            new_awards = {}
+
+            while current_date <= today:
+                date_str = current_date.strftime("%Y-%m-%d")
+
+                # 1️⃣ 출석자 목록
+                cursor.execute("""
+                    SELECT DISTINCT user_id
+                    FROM attendance
+                    WHERE DATE(enter_time) = %s
+                """, (date_str,))
+                user_ids = [row[0] for row in cursor.fetchall()]
+
+                if len(user_ids) < 6:
+                    print(f"[INFO] {date_str}: 출석자 {len(user_ids)}명 → 조건 불충족")
+                    current_date += timedelta(days=1)
+                    continue
+
+                # 2️⃣ 2곡 이상 플레이한 유저 수 확인 (music_play 기준)
+                cursor.execute("""
+                    SELECT user_id
+                    FROM music_play
+                    WHERE DATE(played_at) = %s
+                    GROUP BY user_id
+                    HAVING COUNT(*) >= 2
+                """, (date_str,))
+                qualified_users = [row[0] for row in cursor.fetchall()]
+                qualified_count = len(qualified_users)
+
+                if qualified_count < 6:
+                    print(f"[INFO] {date_str}: 2곡 이상 유저 {qualified_count}명 → 조건 불충족")
+                    current_date += timedelta(days=1)
+                    continue
+
+                # 3️⃣ 이미 도전과제 받은 유저 필터링
+                cursor.execute("""
+                    SELECT user_id FROM user_achievements
+                    WHERE achievement_id = %s
+                """, (achievement_id,))
+                already_awarded = {row[0] for row in cursor.fetchall()}
+
+                to_award = [uid for uid in user_ids if uid not in already_awarded]
+
+                for uid in to_award:
+                    cursor.execute("""
+                        INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                        VALUES (%s, %s, %s)
+                    """, (uid, achievement_id, date_str))
+                    new_awards[str(uid)] = date_str
+
+                if to_award:
+                    conn.commit()
+                    print(f"[INFO] {date_str}: 조별과제 달성자 {len(to_award)}명 기록 완료!")
+                else:
+                    print(f"[INFO] {date_str}: 이미 모든 유저가 조별과제 달성함.")
+
+                current_date += timedelta(days=1)
+
+            team_cache.update(new_awards)
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[FATAL] 실행 중 예외 발생: {e}")
+
+
+#월말평가: 3달 랭킹 누적
 
 
 
@@ -795,6 +965,10 @@ try:
         award_edge_of_tomorrow(conn)
         print("확인: 도원결의")
         award_dowon_pledge(conn)
+        print("확인: 마이웨이")
+        award_myway_achievement(conn)
+        print("확인: 조별과제")
+        award_team_project_achievement(START_DAY, conn)
 except Exception as e:
     import traceback
     print(f"[FATAL] 실행 중 예외 발생: {e}")

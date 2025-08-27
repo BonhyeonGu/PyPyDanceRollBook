@@ -1,6 +1,9 @@
 __pycache__
+.vscode
 config.json
 web_config.json
 output_log*
 static/profiles/*
 *.png
+achievement_cache.json
+youtube_title_cache.json

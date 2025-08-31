@@ -554,6 +554,8 @@ async function renderPopularMusic() {
     });
 }
 
+const INSTANCE_USER = "Nine_Bones";
+
 //날짜 검색
 function setupCalendarEvent() {
     const calendar = document.getElementById("calendar");
@@ -577,96 +579,114 @@ function setupCalendarEvent() {
         const mCount = document.getElementById("music-count");
         pList.innerHTML = "";
         mList.innerHTML = "";
-        if (pCount) pCount.textContent = `(${participants.length})`;
+
+        // ✅ HOST(방장) 제외 로직
+        let renderParticipants = participants;
+        let countLabel = `(${participants.length})`;
+
+        if (
+            Array.isArray(participants) &&
+            participants.length > 0 &&
+            typeof INSTANCE_USER === "string" &&
+            participants[0]?.nickname === INSTANCE_USER
+        ) {
+            // 리스트에서는 첫 번째(방장) 유저 제외
+            renderParticipants = participants.slice(1);
+
+            // 카운트 변경
+            countLabel = `(${participants.length - 1} + 1)`;
+        }
+
+        if (pCount) pCount.textContent = countLabel;
         if (mCount) mCount.textContent = `(${musics.length})`;
 
-        if (participants.length === 0) {
+        if (renderParticipants.length === 0) {
             pList.innerHTML = "<div class='text-sm text-gray-500 dark:text-gray-400'>참여자가 없습니다.</div>";
         } else {
-            participants.forEach((p) => {
-                const el = document.createElement("div");
-                el.className = `
-          user-box bg-white dark:bg-gray-800 text-gray-800 dark:text-white
-          rounded-xl shadow flex items-stretch gap-4
-          transition-all duration-300 min-h-[110px] pl-0 pr-4
-        `.trim();
+            renderParticipants.forEach((p) => {
+            const el = document.createElement("div");
+            el.className = `
+                user-box bg-white dark:bg-gray-800 text-gray-800 dark:text-white
+                rounded-xl shadow flex items-stretch gap-4
+                transition-all duration-300 min-h-[110px] pl-0 pr-4
+            `.trim();
 
-                el.dataset.nickname = p.nickname;
+            el.dataset.nickname = p.nickname;
 
-                el.innerHTML = `
-          <div class="h-[110px] w-[64px] overflow-hidden shrink-0 rounded-l-xl">
-            <img src="${p.img}" alt="${p.nickname} 프로필"
-                class="w-[84px] h-full object-cover object-[40%] border border-gray-300 dark:border-gray-600"
-                onerror="this.src='${PROFILE_BASE}/default.png'">
-          </div>
+            el.innerHTML = `
+                <div class="h-[110px] w-[64px] overflow-hidden shrink-0 rounded-l-xl">
+                <img src="${p.img}" alt="${p.nickname} 프로필"
+                    class="w-[84px] h-full object-cover object-[40%] border border-gray-300 dark:border-gray-600"
+                    onerror="this.src='${PROFILE_BASE}/default.png'">
+                </div>
 
-          <div class="flex-1 flex flex-col justify-center">
-            <div class="font-semibold">${p.nickname}</div>
-            <div class="text-sm text-gray-500 dark:text-gray-300">${p.comment || '한줄 소개 없음'}</div>
-          </div>
+                <div class="flex-1 flex flex-col justify-center">
+                <div class="font-semibold">${p.nickname}</div>
+                <div class="text-sm text-gray-500 dark:text-gray-300">${p.comment || '한줄 소개 없음'}</div>
+                </div>
 
-          <div class="text-sm text-gray-700 dark:text-gray-300 text-right whitespace-nowrap self-center">
-            누적 ${p.total_count}회<br>
-            체류 ${p.duration}분
-          </div>
-        `;
+                <div class="text-sm text-gray-700 dark:text-gray-300 text-right whitespace-nowrap self-center">
+                누적 ${p.total_count}회<br>
+                체류 ${p.duration}분
+                </div>
+            `;
 
-                // 👇 애니메이션 적용
-                el.style.opacity = "0";
-                el.style.transform = "translateY(0.5rem)";
-                el.style.transition = "opacity 0.4s ease, transform 0.4s ease";
+            // 애니메이션
+            el.style.opacity = "0";
+            el.style.transform = "translateY(0.5rem)";
+            el.style.transition = "opacity 0.4s ease, transform 0.4s ease";
 
-                pList.appendChild(el);
-                void el.offsetWidth; // 강제 리플로우
-                el.style.opacity = "1";
-                el.style.transform = "translateY(0)";
+            pList.appendChild(el);
+            void el.offsetWidth;
+            el.style.opacity = "1";
+            el.style.transform = "translateY(0)";
             });
 
             setTimeout(() => {
-                bindUserBoxEvents();
-            }, 400); // transition과 동일 시간
+            bindUserBoxEvents();
+            }, 400);
         }
 
+        // (음악 렌더링 로직은 기존 그대로)
         if (musics.length === 0) {
             mList.innerHTML = "<div class='text-sm text-gray-500 dark:text-gray-400'>재생된 음악이 없습니다.</div>";
         } else {
             musics.forEach(m => {
-                const el = document.createElement("div");
-                el.className = `
-          bg-white dark:bg-gray-800 text-gray-800 dark:text-white
-          rounded-xl shadow p-3 transition-all duration-300 min-h-[110px]
-          relative group
-        `.trim();
+            const el = document.createElement("div");
+            el.className = `
+                bg-white dark:bg-gray-800 text-gray-800 dark:text-white
+                rounded-xl shadow p-3 transition-all duration-300 min-h-[110px]
+                relative group
+            `.trim();
 
-                el.innerHTML = `
-          <div class="text-sm text-gray-500 dark:text-gray-300">${m.played_at}</div>
-          <div class="font-semibold text-sm mt-1">${m.title}</div>
-          <div class="text-sm text-gray-600 dark:text-gray-400">by ${m.user}</div>
-          <div class="absolute top-2 right-2 flex gap-5">
-            <button class="text-xs text-blue-500 hover:underline copy-title">이름 복사</button>
-            <button class="text-xs text-blue-500 hover:underline copy-url">URL 복사</button>
-          </div>
-        `;
+            el.innerHTML = `
+                <div class="text-sm text-gray-500 dark:text-gray-300">${m.played_at}</div>
+                <div class="font-semibold text-sm mt-1">${m.title}</div>
+                <div class="text-sm text-gray-600 dark:text-gray-400">by ${m.user}</div>
+                <div class="absolute top-2 right-2 flex gap-5">
+                <button class="text-xs text-blue-500 hover:underline copy-title">이름 복사</button>
+                <button class="text-xs text-blue-500 hover:underline copy-url">URL 복사</button>
+                </div>
+            `;
 
-                el.querySelector(".copy-title").addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    navigator.clipboard.writeText(m.title).then(() => showToast("제목이 복사되었습니다."));
-                });
+            el.querySelector(".copy-title").addEventListener("click", (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(m.title).then(() => showToast("제목이 복사되었습니다."));
+            });
 
-                el.querySelector(".copy-url").addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    navigator.clipboard.writeText(m.url).then(() => showToast("URL이 복사되었습니다."));
-                });
+            el.querySelector(".copy-url").addEventListener("click", (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(m.url).then(() => showToast("URL이 복사되었습니다."));
+            });
 
-                // 👇 애니메이션 적용
-                el.style.opacity = "0";
-                el.style.transform = "translateY(0.5rem)";
-                el.style.transition = "opacity 0.4s ease, transform 0.4s ease";
+            el.style.opacity = "0";
+            el.style.transform = "translateY(0.5rem)";
+            el.style.transition = "opacity 0.4s ease, transform 0.4s ease";
 
-                mList.appendChild(el);
-                void el.offsetWidth; // 강제 리플로우
-                el.style.opacity = "1";
-                el.style.transform = "translateY(0)";
+            mList.appendChild(el);
+            void el.offsetWidth;
+            el.style.opacity = "1";
+            el.style.transform = "translateY(0)";
             });
         }
     });

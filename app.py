@@ -12,6 +12,9 @@ import numpy as np
 
 from urllib.parse import quote
 
+from concurrent.futures import ThreadPoolExecutor
+import uuid
+
 
 app = Flask(__name__)
 
@@ -45,52 +48,100 @@ cache_store = {
 }
 cache_lock = Lock()
 
-@app.route("/api/refresh-stats")
-def refresh_stats():
-    updated = {}
+executor = ThreadPoolExecutor(max_workers=2)
+_jobs = {}
+_jobs_lock = Lock()
 
+def _compute_and_update_all():
+    updated = {}
     with cache_lock:
-        # 랭킹 유저 캐시 갱신
         for mode in ["total", "weekly", "monthly"]:
             cache_store["ranking_users"][mode] = compute_ranking(mode)
         updated["ranking_users"] = {k: len(v) for k, v in cache_store["ranking_users"].items()}
 
-        # all_users 캐시 갱신
         cache_store["all_users"] = compute_all_users()
         updated["all_users"] = len(cache_store["all_users"])
 
-        # 업적
         cache_store["achievements"] = compute_achievements()
         updated["achievements"] = len(cache_store["achievements"])
 
-        # 인기 음악
         cache_store["popular_music"] = compute_popular_music()
         updated["popular_music"] = len(cache_store["popular_music"])
 
-        # 출석 간격 통계
         summary = compute_attendance_interval_summary()
         cache_store["attendance_interval_summary"] = summary or {}
         updated["attendance_interval_summary"] = bool(summary)
 
-        # 출석 일별 카운트
         cache_store["attendance_daily_count"] = compute_attendance_daily_count()
         updated["attendance_daily_count"] = len(cache_store["attendance_daily_count"])
 
-        
-        # 요일별 출석 통계
         summary = compute_weekday_attendance_summary()
         cache_store["weekday_attendance_summary"] = summary or {}
         updated["weekday_attendance_summary"] = bool(summary)
 
-        # love_graph 캐시 갱신
         cache_store["love_graph"] = compute_love_graph()
         updated["love_graph"] = {
             "nodes": len(cache_store["love_graph"]["nodes"]),
             "links": len(cache_store["love_graph"]["links"])
         }
+    return {"status": "refreshed", "updated": updated}
 
+def _start_job():
+    job_id = str(uuid.uuid4())
+    fut = executor.submit(_compute_and_update_all)
+    with _jobs_lock:
+        _jobs[job_id] = {"future": fut, "started_at": datetime.utcnow(), "done_at": None}
+    def _mark_done(f, jid):
+        with _jobs_lock:
+            if jid in _jobs:
+                _jobs[jid]["done_at"] = datetime.utcnow()
+    fut.add_done_callback(lambda f, jid=job_id: _mark_done(f, jid))
+    return job_id
 
-    return jsonify({"status": "refreshed", "updated": updated})
+def _status_payload(job_id):
+    with _jobs_lock:
+        entry = _jobs.get(job_id)
+    if not entry:
+        return jsonify({"error": "job_id not found"}), 404
+    fut = entry["future"]
+    if not fut.done():
+        return jsonify({
+            "job_id": job_id,
+            "status": "running",
+            "started_at": entry["started_at"].isoformat() + "Z"
+        }), 200
+    try:
+        result = fut.result()
+        return jsonify({
+            "job_id": job_id,
+            "status": "done",
+            "started_at": entry["started_at"].isoformat() + "Z",
+            "done_at": (entry["done_at"].isoformat() + "Z") if entry["done_at"] else None,
+            "result": result
+        }), 200
+    except Exception as e:
+        return jsonify({"job_id": job_id, "status": "failed", "error": str(e)}), 500
+
+# ---- 생성(POST/GET 둘 다 허용) ----
+@app.route("/api/refresh-stats", methods=["GET", "POST"])
+@app.route("/api/refresh-stats/", methods=["GET", "POST"])  # 슬래시 호환
+def refresh_stats_async():
+    # GET으로 들어와도 바로 잡 생성(하위호환)
+    job_id = _start_job()
+    return jsonify({"job_id": job_id, "status": "accepted"}), 202
+
+# ---- 상태조회: path 파라미터 버전 ----
+@app.route("/api/refresh-stats/<job_id>", methods=["GET"])
+def refresh_stats_status(job_id):
+    return _status_payload(job_id)
+
+# ---- 상태조회: 쿼리스트링 버전 (?job_id=...) ----
+@app.route("/api/refresh-stats/status", methods=["GET"])
+def refresh_stats_status_qs():
+    job_id = request.args.get("job_id")
+    if not job_id:
+        return jsonify({"error": "missing job_id"}), 400
+    return _status_payload(job_id)
 
 
 def safe_filename(nickname):
@@ -440,14 +491,20 @@ def music_by_date():
         conn.close()
 
 #---------------------------------------------------------------------------------------
+DAYRANGE = 90
+#---------------------------------------------------------------------------------------
 
-DAYRANGE = 60 #최근 60일
+
+# ------------------------------------------------------------
+# 전역에 기간 상수 추가 (오늘 제외, 최근 N일)
+DAYRANGE = 90
+# ------------------------------------------------------------
 
 def compute_attendance_interval_summary():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            end_date = datetime.now().date() - timedelta(days=1)
+            end_date = datetime.now().date() - timedelta(days=1)  # 오늘 제외
             date_list = [end_date - timedelta(days=i) for i in range(DAYRANGE)]
 
             segment_ratio_sums = [0.0] * 6
@@ -456,7 +513,8 @@ def compute_attendance_interval_summary():
             for d in date_list:
                 date_str = d.strftime("%Y-%m-%d")
                 cursor.execute("""
-                    SELECT enter_time FROM attendance
+                    SELECT enter_time
+                    FROM attendance
                     WHERE DATE(enter_time) = %s
                     ORDER BY enter_time ASC
                 """, (date_str,))
@@ -464,6 +522,7 @@ def compute_attendance_interval_summary():
                 if not entries:
                     continue
 
+                # 첫 입장 시각 기준으로 1시간 창 설정 (분 단위 0/30으로 정렬)
                 first_entry = entries[0][0]
                 minute = first_entry.minute
                 rounded_min = 0 if minute < 15 else 30 if minute < 45 else 60
@@ -472,11 +531,11 @@ def compute_attendance_interval_summary():
                 start_time = datetime(d.year, d.month, d.day, start_hour, start_min)
                 end_time = start_time + timedelta(hours=1)
 
+                # 10분 간격 경계(7점 → 6구간)
                 segments = [start_time + timedelta(minutes=10*i) for i in range(7)]
                 counts = [0] * 6
 
-                for row in entries:
-                    enter_time = row[0]
+                for (enter_time,) in entries:
                     if not (start_time <= enter_time < end_time):
                         continue
                     for i in range(6):
@@ -496,12 +555,10 @@ def compute_attendance_interval_summary():
                 return None
 
             averages = [round(s / valid_days * 100, 2) for s in segment_ratio_sums]
-
             return {
                 "labels": ["0~10분", "10~20분", "20~30분", "30~40분", "40~50분", "50~60분"],
                 "averages": averages
             }
-
     finally:
         conn.close()
 
@@ -510,17 +567,18 @@ def attendance_interval_summary():
     with cache_lock:
         summary = cache_store["attendance_interval_summary"]
     if not summary:
-        return jsonify({"error": "No data found for last 30 days"}), 404
+        return jsonify({"error": f"No data found for last {DAYRANGE} days"}), 404
     return jsonify(summary)
 
-#---------------------------------------------------------------------------------------
+
+# ------------------------------------------------------------
 
 def compute_attendance_daily_count():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            end_date = datetime.now().date() - timedelta(days=1)
-            start_date = end_date - timedelta(days=(DAYRANGE-1))
+            end_date = datetime.now().date() - timedelta(days=1)       # 오늘 제외
+            start_date = end_date - timedelta(days=(DAYRANGE - 1))     # 최근 DAYRANGE일 범위
 
             cursor.execute("""
                 SELECT DATE(a.enter_time) AS date, COUNT(DISTINCT a.user_id) AS user_count
@@ -532,7 +590,7 @@ def compute_attendance_daily_count():
 
             rows = cursor.fetchall()
             return [
-                { "date": row[0].strftime("%Y-%m-%d"), "count": row[1] }
+                {"date": row[0].strftime("%Y-%m-%d"), "count": row[1]}
                 for row in rows
             ]
     finally:
@@ -544,16 +602,16 @@ def attendance_daily_count():
         return jsonify(cache_store["attendance_daily_count"])
 
 
-#---------------------------------------------------------------------------------------
+# ------------------------------------------------------------
 
 def compute_weekday_attendance_summary():
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            end_date = datetime.now().date() - timedelta(days=1)
+            end_date = datetime.now().date() - timedelta(days=1)  # 오늘 제외
             date_list = [end_date - timedelta(days=i) for i in range(DAYRANGE)]
 
-            weekday_counts = [0] * 7  # 월 ~ 일
+            weekday_counts = [0] * 7  # 월(0) ~ 일(6)
             weekday_days = [0] * 7
 
             for d in date_list:
@@ -581,13 +639,12 @@ def compute_weekday_attendance_summary():
     finally:
         conn.close()
 
-
 @app.route("/api/weekday-attendance-summary")
 def weekday_attendance_summary():
     with cache_lock:
         summary = cache_store["weekday_attendance_summary"]
     if not summary:
-        return jsonify({"error": "No data available"}), 404
+        return jsonify({"error": f"No data available for last {DAYRANGE} days"}), 404
     return jsonify(summary)
 
 
@@ -596,17 +653,10 @@ def weekday_attendance_summary():
 MIN_EDGE_WEIGHT = 0.5
 SLOT_MINUTES = 5
 SLOT_OFFSET_MINUTES = SLOT_MINUTES // 2
-DAYRANGE = 30
 EXCLUDED_NICKNAMES = {"아짱나", "미쿠", "Nine_Bones"}
 LOVE_HIGHLIGHT_MAX = 5
 SOFT_SIGMA = 1.0  # soft cosine에서 시간 슬롯 유사도 제어
 
-MIN_EDGE_WEIGHT = 0.5
-SLOT_MINUTES = 5
-SLOT_OFFSET_MINUTES = SLOT_MINUTES // 2
-DAYRANGE = 30
-EXCLUDED_NICKNAMES = {"아짱나", "미쿠", "Nine_Bones"}
-LOVE_HIGHLIGHT_MAX = 5
 
 def compute_love_graph():
     SLOTS_PER_DAY = (60 * 24) // SLOT_MINUTES

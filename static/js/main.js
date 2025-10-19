@@ -249,7 +249,7 @@ async function renderRankingList(mode = "total", offset = 0) {
                 <div class="relative group">
                     <img src="/static/achievements/a_${ach.name}.png"
                         alt="${ach.name} 아이콘"
-                        class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-pointer">
+                        class="w-8 h-8 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-default">
                     <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2
                                 bg-blue-100 dark:bg-blue-950 text-gray-800 dark:text-white text-xs px-4 py-3 rounded-xl
                                 border border-blue-300 dark:border-blue-700 shadow-lg
@@ -764,139 +764,275 @@ function drawChart(canvas, labels, data, isDark) {
 }
 
 
-async function searchUser() {
-    const name = document.getElementById("searchInput").value.trim();
-    const resultBox = document.getElementById("searchResult");
-    resultBox.innerHTML = "";
 
-    if (!name) return;
+// 레이아웃/스크롤/도전과제 그리드/툴팁 CSS 주입 (최초 1회)
+(function injectOnce() {
+  if (document.getElementById("fixed-grid-and-scroll-style")) return;
+  const s = document.createElement("style");
+  s.id = "fixed-grid-and-scroll-style";
+  s.textContent = `
+  /* 고정 3-컬럼 레이아웃 */
+  @media (min-width: 1024px) { .grid-3-fixed-lg { grid-template-columns: 20rem 1fr 22rem; } }
 
-    try {
-        const res = await fetch(`/api/user-details?nickname=${encodeURIComponent(name)}`);
-        if (!res.ok) throw new Error("유저를 찾을 수 없습니다");
-        const p = await res.json();
+  /* 스크롤바 테마 + 레이아웃 쉬프트 방지 */
+  .themed-scroll { scrollbar-width: thin; scrollbar-color: #9ca3af #e5e7eb; scrollbar-gutter: stable both-edges; }
+  html.dark .themed-scroll { scrollbar-color: #6b7280 #1f2937; }
+  .themed-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .themed-scroll::-webkit-scrollbar-track { background: #e5e7eb; }
+  .themed-scroll::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 9999px; }
+  html.dark .themed-scroll::-webkit-scrollbar-track { background: #1f2937; }
+  html.dark .themed-scroll::-webkit-scrollbar-thumb { background: #6b7280; }
 
-        const card = document.createElement("div");
-        card.className = "bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-xl shadow p-6 transition-colors duration-300";
+  /* 도전과제 그리드: 좌우 여백(2px), md부터 3열 */
+  .ach-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); column-gap: 1px; row-gap: 16px; place-items: center; }
+  @media (min-width: 768px) { .ach-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+  @media (min-width: 1024px) { .ach-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
 
-        const achLeft = document.createElement("div");
-        achLeft.className = "flex flex-wrap justify-end gap-2 w-32";
+  /* 바디 포털 툴팁 */
+  .ach-tooltip {
+    position: fixed; z-index: 9999; pointer-events: none;
+    background: #dbeafe; color: #111827; border: 1px solid #93c5fd;
+    padding: 10px 14px; border-radius: 0.75rem; box-shadow: 0 10px 25px rgba(0,0,0,.2);
+    max-width: 26rem; min-width: 18rem; white-space: normal; opacity: 0; transform: translateY(4px);
+    transition: opacity .12s ease, transform .12s ease;
+  }
+  html.dark .ach-tooltip {
+    background: #0B1C3A; color: white; border-color: #1e3a8a;
+  }
+  .ach-tooltip.show { opacity: 1; transform: translateY(0); }
+  .ach-tooltip .title { font-weight: 700; font-size: 15px; margin-bottom: .35rem; }
+  .ach-tooltip .line { font-size: 13px; line-height: 1.2; }
+  .ach-tooltip .line.first { color: #1e40af; }
+  html.dark .ach-tooltip .line.first { color: #93c5fd; }
+  `;
+  document.head.appendChild(s);
+})();
 
-        const achRight = document.createElement("div");
-        achRight.className = "flex flex-wrap justify-start gap-2 w-32";
+// 포털 툴팁 유틸
+function attachPortalTooltip(targetEl, title, descLines) {
+  let tip = null;
 
-        const achs = p.achievements || [];
-        const half = Math.ceil(achs.length / 2);
+  const buildHTML = () => {
+    const lines = (descLines || []).map((t, i) =>
+      `<div class="line ${i===0 ? 'first':''}">${t}</div>`).join("");
+    return `<div class="title">${title}</div><div>${lines}</div>`;
+  };
 
-        achs.forEach((ach, i) => {
-            const achDiv = document.createElement("div");
-            achDiv.className = "relative group";
+  const placeTip = (ev) => {
+    if (!tip) return;
+    const rect = targetEl.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
 
-            const descLines = (ach.description || "").split(",,,").map(part => part.trim());
-            const descHtml = descLines.map((line, i) =>
-                `<div class="text-[13px] leading-snug ${i === 0 ? "text-blue-800 dark:text-blue-400" : "italic text-blue-800 dark:text-blue-500"}">${line}</div>`
-            ).join("");
+    // 기본: 아이콘 중심 상단에 8px 위로
+    const tipRect = tip.getBoundingClientRect();
+    let left = rect.left + rect.width/2 - tipRect.width/2;
+    let top  = rect.top - tipRect.height - 8;
 
-            achDiv.innerHTML = `
-            <img src="/static/achievements/a_${ach.name}.png"
-                alt="${ach.name} 아이콘"
-                class="w-20 h-20 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-pointer">
-            <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-3
-                        bg-blue-100 dark:bg-blue-950 text-gray-800 dark:text-white text-sm px-5 py-4 rounded-xl
-                        border border-blue-300 dark:border-blue-700 shadow-lg
-                        opacity-0 group-hover:opacity-100 transition-opacity duration-200
-                        pointer-events-none z-50 text-center min-w-[22rem] max-w-[28rem] whitespace-normal">
-              <div class="font-bold text-base text-blue-900 dark:text-blue-300">${ach.name} (${ach.achieved_at})</div>
-              <div class="mt-2 flex flex-col gap-1">
-                ${descHtml}
-              </div>
-            </div>
-          `;
+    // 화면 밖이면 보정
+    const margin = 8;
+    if (left < margin) left = margin;
+    if (left + tipRect.width > vw - margin) left = vw - margin - tipRect.width;
 
-            if (i < half) {
-                achLeft.appendChild(achDiv);
-            } else {
-                achRight.appendChild(achDiv);
-            }
-        });
+    // 위쪽이 부족하면 아래로 띄우기
+    if (top < margin) top = rect.bottom + 8;
 
-        const infoDiv = document.createElement("div");
-        infoDiv.className = "flex flex-col items-center text-center sm:px-4";
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top  = `${Math.round(top)}px`;
+  };
 
-        const totalSec = p.play_duration_sec || 0;
-        const hours = Math.floor(totalSec / 3600);
-        const minutes = Math.floor((totalSec % 3600) / 60);
-        const formattedPlayTime = `${hours}시간 ${minutes}분`;
+  const onEnter = (ev) => {
+    tip = document.createElement("div");
+    tip.className = "ach-tooltip";
+    tip.innerHTML = buildHTML();
+    document.body.appendChild(tip);
+    // 최초 배치 후 표시
+    requestAnimationFrame(() => {
+      placeTip(ev);
+      tip.classList.add("show");
+    });
+    window.addEventListener("scroll", placeTip, true);
+    window.addEventListener("resize", placeTip, true);
+    targetEl.addEventListener("mousemove", placeTip, { passive: true });
+  };
 
-        infoDiv.innerHTML = `
-          <img src="${p.img}" onerror="this.src='/static/profiles/default.png'" 
-              alt="${p.nickname} 프로필"
-              class="w-52 h-52 rounded-full object-cover border-4 border-gray-300 dark:border-gray-600 mb-4" />
-          <h3 class="text-2xl font-bold mb-2">${p.nickname}</h3>
-          <p class="text-gray-500 italic mb-2">${p.comment || "한줄 소개 없음"}</p>
-          <div class="flex justify-between flex-wrap gap-6 text-gray-800 dark:text-gray-200 text-base sm:text-lg w-full px-6 max-w-2xl translate-x-8">
-            <div class="flex flex-col gap-1 text-left min-w-[12rem] sm:min-w-[14rem]">
-              <p><strong>누적 출석:</strong> ${p.total_count}회</p>
-              <p><strong>총 플레이:</strong> ${formattedPlayTime}</p>
-            </div>
-            <div class="flex flex-col gap-1 text-left min-w-[12rem] sm:min-w-[14rem]">
-              <p><strong>최근 접속:</strong> ${p.last_attended || "기록 없음"}</p>
-              <p><strong>곡 선택:</strong> ${p.song_play_count}회</p>
-            </div>
-          </div>
-        `;
-
-        const layout = document.createElement("div");
-        layout.className = "flex flex-col items-center sm:flex-row sm:items-start sm:justify-center gap-4";
-        layout.appendChild(achLeft);
-        layout.appendChild(infoDiv);
-        layout.appendChild(achRight);
-
-        card.appendChild(layout);
-
-        // ✅ 그래프 추가
-        if (p.recent_30days && p.recent_30days.length) {
-            const chartWrapper = document.createElement("div");
-            chartWrapper.className = "mt-6 w-full max-w-3xl mx-auto";
-
-            const canvas = document.createElement("canvas");
-            canvas.id = "durationChart";
-            canvas.className = "w-full";
-            canvas.height = 60; // 실제 픽셀 높이
-
-            chartWrapper.appendChild(canvas);
-            card.appendChild(chartWrapper);
-
-            const labels = p.recent_30days.map(item => {
-                const [, month, day] = item.date.split("-");
-                return `${month}-${day}`;
-            });
-
-            const data = p.recent_30days.map(item => (item.duration_sec / 60).toFixed(1));
-
-            // ✅ 현재 테마 확인
-            const isDark = document.documentElement.classList.contains("dark");
-            drawChart(canvas, labels, data, isDark);
-
-        }
-
-        // ✅ 애니메이션 초기 클래스 삽입
-        card.style.opacity = "0";
-        card.style.transform = "translateY(0.5rem)";
-        card.style.transition = "opacity 0.4s ease, transform 0.4s ease";
-        resultBox.appendChild(card);
-
-        // 강제 리플로우
-        card.getBoundingClientRect(); // 또는 void card.offsetWidth;
-
-        // 애니메이션 적용
-        card.style.opacity = "1";
-        card.style.transform = "translateY(0)";
-
-    } catch (err) {
-        resultBox.innerHTML = `<div class="text-sm text-red-500">[오류] ${err.message}</div>`;
+  const onLeave = () => {
+    if (tip) {
+      tip.remove();
+      tip = null;
     }
+    window.removeEventListener("scroll", placeTip, true);
+    window.removeEventListener("resize", placeTip, true);
+    targetEl.removeEventListener("mousemove", placeTip);
+  };
+
+  targetEl.addEventListener("mouseenter", onEnter);
+  targetEl.addEventListener("mouseleave", onLeave);
 }
+
+async function searchUser() {
+  const name = document.getElementById("searchInput").value.trim();
+  const resultBox = document.getElementById("searchResult");
+  resultBox.innerHTML = "";
+  if (!name) return;
+
+  try {
+    const res = await fetch(`/api/user-details?nickname=${encodeURIComponent(name)}`);
+    if (!res.ok) throw new Error("유저를 찾을 수 없습니다");
+    const p = await res.json();
+
+    // 카드 컨테이너 (좌 이미지 풀블리드)
+    const card = document.createElement("div");
+    card.className = [
+      "bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100",
+      "rounded-2xl shadow overflow-hidden",
+      "grid gap-0 grid-cols-1",
+      "lg:grid-cols-3",
+      "grid-3-fixed-lg"
+    ].join(" ");
+
+    // 좌: 프로필 (박스 높이 다소 낮춤)
+    const leftCol = document.createElement("aside");
+    leftCol.className = "flex flex-col";
+    const avatarFrame = document.createElement("div");
+    avatarFrame.className = "w-full h-56 sm:h-72 lg:h-[24rem] xl:h-[28rem] bg-gray-200 dark:bg-gray-700 overflow-hidden";
+    const avatar = document.createElement("img");
+    avatar.src = p.img || "/static/profiles/default.png";
+    avatar.onerror = function(){ this.src = "/static/profiles/default.png"; };
+    avatar.alt = `${p.nickname} 프로필`;
+    avatar.className = "w-full h-full object-cover object-[50%_center] block";
+    avatarFrame.appendChild(avatar);
+    leftCol.appendChild(avatarFrame);
+
+    // 중: 이름/소개/6 정보/차트
+    const centerCol = document.createElement("section");
+    centerCol.className = "flex flex-col gap-4 min-w-0 p-3 sm:p-4 lg:p-6";
+
+    const header = document.createElement("div");
+    header.innerHTML = `
+      <h3 class="text-2xl sm:text-3xl font-extrabold tracking-tight">${p.nickname}</h3>
+      <p class="text-gray-500 dark:text-gray-400 italic mt-1">${p.comment || "한줄 소개 없음"}</p>
+    `;
+    centerCol.appendChild(header);
+
+    const totalSec = p.play_duration_sec || 0;
+    const hours = Math.floor(totalSec / 3600);
+    const minutes = Math.floor((totalSec % 3600) / 60);
+    const formattedPlayTime = `${hours}시간 ${minutes}분`;
+    const monthlyTopN = p.topn_monthly_count_excl_current ?? 0;
+    const weeklyTopN  = p.topn_weekly_count_excl_current ?? 0;
+
+    // ✅ 월간 랭킹 ↔ 최근 접속 자리 교체 (월간랭킹을 3번째, 최근접속을 5번째로)
+    const infoGrid = document.createElement("div");
+    infoGrid.className = "grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+    infoGrid.innerHTML = `
+      <div class="p-3 rounded-xl bg-gray-50 dark:bg-gray-900/40">
+        <div class="text-sm text-gray-500 dark:text-gray-400">누적 출석</div>
+        <div class="text-lg sm:text-xl font-semibold mt-1">${p.total_count}회</div>
+      </div>
+      <div class="p-3 rounded-xl bg-gray-50 dark:bg-gray-900/40">
+        <div class="text-sm text-gray-500 dark:text-gray-400">총 플레이</div>
+        <div class="text-lg sm:text-xl font-semibold mt-1">${formattedPlayTime}</div>
+      </div>
+      <!-- ③ 월간 랭킹 -->
+      <div class="p-3 rounded-xl bg-gray-50 dark:bg-gray-900/40">
+        <div class="text-sm text-gray-500 dark:text-gray-400">월간 랭킹(Top5)</div>
+        <div class="text-lg sm:text-xl font-semibold mt-1">${monthlyTopN}회</div>
+      </div>
+      <div class="p-3 rounded-xl bg-gray-50 dark:bg-gray-900/40">
+        <div class="text-sm text-gray-500 dark:text-gray-400">곡 선택</div>
+        <div class="text-lg sm:text-xl font-semibold mt-1">${p.song_play_count || 0}회</div>
+      </div>
+      <!-- ⑤ 최근 접속 -->
+      <div class="p-3 rounded-xl bg-gray-50 dark:bg-gray-900/40">
+        <div class="text-sm text-gray-500 dark:text-gray-400">최근 접속</div>
+        <div class="text-sm sm:text-xl font-semibold mt-1">${p.last_attended || "기록 없음"}</div>
+      </div>
+      <div class="p-3 rounded-xl bg-gray-50 dark:bg-gray-900/40">
+        <div class="text-sm text-gray-500 dark:text-gray-400">주간 랭킹(Top5)</div>
+        <div class="text-lg sm:text-xl font-semibold mt-1">${weeklyTopN}회</div>
+      </div>
+    `;
+    centerCol.appendChild(infoGrid);
+
+    if (p.recent_30days && p.recent_30days.length) {
+      const chartWrapper = document.createElement("div");
+      chartWrapper.className = "mt-1.5 w-full";
+      const canvas = document.createElement("canvas");
+      canvas.id = "durationChart";
+      canvas.className = "w-full";
+      canvas.height = 52;
+      chartWrapper.appendChild(canvas);
+      centerCol.appendChild(chartWrapper);
+
+      const labels = p.recent_30days.map(it => { const [, m, d] = it.date.split("-"); return `${m}-${d}`; });
+      const data = p.recent_30days.map(it => (it.duration_sec / 60).toFixed(1));
+      const isDark = document.documentElement.classList.contains("dark");
+      drawChart(canvas, labels, data, isDark);
+    }
+
+    // 우: 도전과제 (더 촘촘/작은 아이콘/3열, 포털 툴팁)
+    const rightCol = document.createElement("aside");
+    rightCol.className = "flex flex-col gap-2 min-w-0 p-3 sm:p-4 lg:p-6 lg:max-h-[28rem] overflow-auto themed-scroll";
+
+    const achs = p.achievements || [];
+    if (achs.length) {
+      const achHeader = document.createElement("h4");
+      achHeader.className = "text-base sm:text-lg font-semibold";
+      achHeader.textContent = "도전과제";
+      rightCol.appendChild(achHeader);
+
+      const achGrid = document.createElement("div");
+      achGrid.className = "ach-grid"; // ← 주입한 CSS 사용 (3열, 가로 2px)
+
+      achs.forEach(ach => {
+        const achDiv = document.createElement("div");
+        achDiv.className = "relative";
+
+        // 설명 라인
+        const descLines = (ach.description || "").split(",,,").map(s => s.trim()).filter(Boolean);
+
+        // 아이콘 (64px)
+        const img = document.createElement("img");
+        img.src = `/static/achievements/a_${ach.name}.png`;
+        img.alt = `${ach.name} 아이콘`;
+        img.className = "w-16 h-16 rounded object-cover border border-gray-300 dark:border-gray-600 cursor-default";
+
+        // 포털 툴팁 부착 (카드/검색영역 경계 밖으로도 보임)
+        const title = `${ach.name} (${ach.achieved_at})`;
+        attachPortalTooltip(img, title, descLines);
+
+        achDiv.appendChild(img);
+        achGrid.appendChild(achDiv);
+      });
+
+      rightCol.appendChild(achGrid);
+    } else {
+      const noAch = document.createElement("div");
+      noAch.className = "text-sm text-gray-500 dark:text-gray-400";
+      noAch.textContent = "도전과제가 없습니다.";
+      rightCol.appendChild(noAch);
+    }
+
+    // 조립
+    card.appendChild(leftCol);
+    card.appendChild(centerCol);
+    card.appendChild(rightCol);
+
+    // 페이드인
+    card.style.opacity = "0";
+    card.style.transform = "translateY(0.5rem)";
+    card.style.transition = "opacity 0.4s ease, transform 0.4s ease";
+    resultBox.appendChild(card);
+    card.getBoundingClientRect();
+    card.style.opacity = "1";
+    card.style.transform = "translateY(0)";
+
+  } catch (err) {
+    resultBox.innerHTML = `<div class="text-sm text-red-500">[오류] ${err.message}</div>`;
+  }
+}
+
+
 
 
 function smoothScrollTo(targetY, duration = 400) {

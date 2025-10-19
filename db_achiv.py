@@ -925,6 +925,72 @@ def award_team_project_achievement(start_date_str: str, conn):
         print(f"[FATAL] 실행 중 예외 발생: {e}")
 
 
+# 2025추석
+def award_chuseok_2025_achievement(conn):
+    cache = load_achievement_cache()
+    chuseok_cache = ensure_achievement_key(cache, "2025추석")
+
+    try:
+        sync_cache_to_db(cache, "2025추석", conn)
+
+        with conn.cursor() as cursor:
+            # 1️⃣ 도전과제 ID 조회
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = '2025추석'")
+            result = cursor.fetchone()
+            if not result:
+                print("[ERROR] '2025추석' 도전과제가 존재하지 않습니다.")
+                return
+            achievement_id = result[0]
+
+            # 2️⃣ 전체 유저 조회
+            cursor.execute("SELECT DISTINCT user_id FROM attendance")
+            all_users = [row[0] for row in cursor.fetchall()]
+
+            # 3️⃣ 이미 달성한 유저 (DB)
+            cursor.execute("""
+                SELECT user_id FROM user_achievements
+                WHERE achievement_id = %s
+            """, (achievement_id,))
+            already_awarded = {row[0] for row in cursor.fetchall()}
+
+            # 4️⃣ 대상 유저 필터링
+            target_users = [
+                uid for uid in all_users
+                if str(uid) not in chuseok_cache and uid not in already_awarded
+            ]
+
+            # 5️⃣ 날짜 범위
+            start_date = datetime(2025, 10, 3).date()
+            end_date = datetime(2025, 10, 12).date()
+
+            new_awards = {}
+
+            for uid in target_users:
+                cursor.execute("""
+                    SELECT DISTINCT DATE(enter_time)
+                    FROM attendance
+                    WHERE user_id = %s AND DATE(enter_time) BETWEEN %s AND %s
+                    ORDER BY DATE(enter_time)
+                """, (uid, start_date, end_date))
+                rows = [row[0] for row in cursor.fetchall()]
+
+                if len(rows) >= 6:
+                    achieved_at = rows[5].strftime("%Y-%m-%d")  # 6번째 날
+                    cursor.execute("""
+                        INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                        VALUES (%s, %s, %s)
+                    """, (uid, achievement_id, achieved_at))
+                    conn.commit()
+                    new_awards[str(uid)] = achieved_at
+                    print(f"[INFO] 유저 {uid} - 2025추석 도전과제 달성! ({achieved_at})")
+
+            chuseok_cache.update(new_awards)
+            save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[ERROR] 처리 중 예외 발생: {e}")
+
+
 #월말평가: 3달 랭킹 누적
 
 
@@ -969,6 +1035,8 @@ try:
         award_myway_achievement(conn)
         print("확인: 조별과제")
         award_team_project_achievement(START_DAY, conn)
+        print("확인: 2025추석")
+        award_chuseok_2025_achievement(conn)
 except Exception as e:
     import traceback
     print(f"[FATAL] 실행 중 예외 발생: {e}")

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>{{ stats.nickname }} - 활동 카드</title>
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ stats.nickname }}님의 활동 카드">
+  <meta property="og:description" content="참여 {{ stats.total_count }}회 · 누적 {{ (stats.total_duration_sec // 3600)|string }}시간 {{ ((stats.total_duration_sec % 3600)//60)|string }}분 · 도전과제 {{ stats.achv_count }}개">
+  <meta property="og:image" content="{{ og_image_url }}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:url" content="{{ request.url }}">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ stats.nickname }}님의 활동 카드">
+  <meta name="twitter:description" content="참여 {{ stats.total_count }}회 · 누적 {{ (stats.total_duration_sec // 3600)|string }}시간 {{ ((stats.total_duration_sec % 3600)//60)|string }}분 · 도전과제 {{ stats.achv_count }}개">
+  <meta name="twitter:image" content="{{ og_image_url }}">
+</head>
+<body>
+  <noscript>
+    <meta http-equiv="refresh" content="0; url=/">
+    <p>자동으로 홈으로 이동합니다. <a href="/">여기를 클릭</a></p>
+  </noscript>
+  <script>
+    window.location.replace("/");
+  </script>
+</body>
+</html>

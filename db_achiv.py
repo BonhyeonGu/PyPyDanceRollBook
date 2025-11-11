@@ -989,6 +989,70 @@ def award_chuseok_2025_achievement(conn):
 
     except Exception as e:
         print(f"[ERROR] 처리 중 예외 발생: {e}")
+5
+
+TARGET_DATES = [
+    "2025-10-20"
+]
+
+def award_attendance_on_specific_dates(conn):
+    cache = load_achievement_cache()
+    achv_name = "감자서버"  # 도전과제 이름
+    achv_cache = ensure_achievement_key(cache, achv_name)
+
+    try:
+        sync_cache_to_db(cache, achv_name, conn)
+
+        with conn.cursor() as cursor:
+            # 1️⃣ 도전과제 ID 조회
+            cursor.execute("SELECT achievement_id FROM achievements WHERE name = %s", (achv_name,))
+            result = cursor.fetchone()
+            if not result:
+                print(f"[ERROR] '{achv_name}' 도전과제가 존재하지 않습니다.")
+                return
+            achievement_id = result[0]
+
+            # 2️⃣ 출석한 유저 및 날짜 조회
+            cursor.execute(f"""
+                SELECT user_id, MIN(DATE(enter_time)) AS first_seen
+                FROM attendance
+                WHERE DATE(enter_time) IN ({','.join(['%s'] * len(TARGET_DATES))})
+                GROUP BY user_id
+            """, TARGET_DATES)
+            rows = cursor.fetchall()
+
+            if not rows:
+                print("[INFO] 조건에 맞는 유저가 없습니다.")
+                return
+
+            # 3️⃣ DB 기준 중복 제거
+            cursor.execute("""
+                SELECT user_id FROM user_achievements
+                WHERE achievement_id = %s
+            """, (achievement_id,))
+            already_awarded = {row[0] for row in cursor.fetchall()}
+
+            new_awards = {}
+
+            for uid, date in rows:
+                if str(uid) in achv_cache or uid in already_awarded:
+                    continue
+
+                cursor.execute("""
+                    INSERT INTO user_achievements (user_id, achievement_id, achieved_at)
+                    VALUES (%s, %s, %s)
+                """, (uid, achievement_id, date))
+                new_awards[str(uid)] = date.strftime("%Y-%m-%d")
+                print(f"[INFO] 유저 {uid} - '{achv_name}' 도전과제 달성! ({date})")
+
+            if new_awards:
+                conn.commit()
+                achv_cache.update(new_awards)
+                save_achievement_cache(cache)
+
+    except Exception as e:
+        print(f"[FATAL] 실행 중 예외 발생: {e}")
+
 
 
 #월말평가: 3달 랭킹 누적
@@ -1037,6 +1101,8 @@ try:
         award_team_project_achievement(START_DAY, conn)
         print("확인: 2025추석")
         award_chuseok_2025_achievement(conn)
+        print("확인: 감자서버")
+        award_attendance_on_specific_dates(conn)
 except Exception as e:
     import traceback
     print(f"[FATAL] 실행 중 예외 발생: {e}")

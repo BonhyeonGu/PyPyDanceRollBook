@@ -74,54 +74,75 @@ def update_last_processed_line(db_conf, filename, line_number):
         conn.close()
 
 
-def insert_results_to_db(db_conf, attendance_list, music_list):
-    conn = pymysql.connect(
-        host=db_conf["host"],
-        port=db_conf.get("port", 3306),
-        user=db_conf["user"],
-        password=db_conf["password"],
-        db=db_conf["database"],
-        charset="utf8mb4"
-    )
-    try:
-        with conn.cursor() as cursor:
-            for a in attendance_list:
-                cursor.execute(
-                    "SELECT user_id FROM users WHERE nickname = %s",
-                    (a["name"],)
-                )
-                result = cursor.fetchone()
-                if result:
-                    user_id = result[0]
-                    cursor.execute("""
-                        INSERT INTO attendance (user_id, enter_time, leave_time, duration_sec)
-                        VALUES (%s, %s, %s, %s)
-                    """, (user_id, a["start"], a["end"], int(a["duration"].total_seconds())))
+def insert_results_to_db(db_conf, attendance_list, music_list, max_retries=5):
+    RETRYABLE = {2003, 2013, 1205, 1213}  # 2003: 연결실패, 2013: 연결끊김, 1205/1213: 락/데드락
+    base_delay = 2.0
 
-                    cursor.execute("""
-                        INSERT INTO user_attendance_summary (user_id, total_count, last_attended)
-                        VALUES (%s, 1, %s)
-                        ON DUPLICATE KEY UPDATE
-                            total_count = total_count + 1,
-                            last_attended = GREATEST(last_attended, VALUES(last_attended))
-                    """, (user_id, a["end"]))
+    attempt = 0
+    while True:
+        try:
+            conn = pymysql.connect(
+                host=db_conf["host"],
+                port=db_conf.get("port", 3306),
+                user=db_conf["user"],
+                password=db_conf["password"],
+                db=db_conf["database"],
+                charset="utf8mb4",
+                connect_timeout=8,
+                read_timeout=15,
+                write_timeout=15,
+            )
+            try:
+                with conn.cursor() as cursor:
+                    for a in attendance_list:
+                        cursor.execute(
+                            "SELECT user_id FROM users WHERE nickname = %s",
+                            (a["name"],)
+                        )
+                        result = cursor.fetchone()
+                        if result:
+                            user_id = result[0]
+                            cursor.execute("""
+                                INSERT INTO attendance (user_id, enter_time, leave_time, duration_sec)
+                                VALUES (%s, %s, %s, %s)
+                            """, (user_id, a["start"], a["end"], int(a["duration"].total_seconds())))
 
-            for m in music_list:
-                cursor.execute(
-                    "SELECT user_id FROM users WHERE nickname = %s",
-                    (m["user"],)
-                )
-                result = cursor.fetchone()
-                if result:
-                    user_id = result[0]
-                    cursor.execute("""
-                        INSERT INTO music_play (user_id, played_at, title, url)
-                        VALUES (%s, %s, %s, %s)
-                    """, (user_id, m["timestamp"], m["title"], m["url"]))
+                            cursor.execute("""
+                                INSERT INTO user_attendance_summary (user_id, total_count, last_attended)
+                                VALUES (%s, 1, %s)
+                                ON DUPLICATE KEY UPDATE
+                                    total_count = total_count + 1,
+                                    last_attended = GREATEST(last_attended, VALUES(last_attended))
+                            """, (user_id, a["end"]))
 
-        conn.commit()
-    finally:
-        conn.close()
+                    for m in music_list:
+                        cursor.execute(
+                            "SELECT user_id FROM users WHERE nickname = %s",
+                            (m["user"],)
+                        )
+                        result = cursor.fetchone()
+                        if result:
+                            user_id = result[0]
+                            cursor.execute("""
+                                INSERT INTO music_play (user_id, played_at, title, url)
+                                VALUES (%s, %s, %s, %s)
+                            """, (user_id, m["timestamp"], m["title"], m["url"]))
+                conn.commit()
+                return  # 성공적으로 종료
+            finally:
+                conn.close()
+
+        except pymysql.err.OperationalError as e:
+            errno = e.args[0] if e.args else None
+            attempt += 1
+            # 재시도 가능한 오류이면서 횟수 남아있으면 대기 후 재시도
+            if errno in RETRYABLE and attempt <= max_retries:
+                delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+                print(f"[DB] insert 재시도 {attempt}/{max_retries}… {delay:.1f}s 대기 (errno={errno}, msg={e})")
+                time.sleep(delay)
+                continue
+            # 재시도 불가 또는 횟수 초과면 그대로 올림
+            raise
 
 
 def should_run_now(target_time_str):

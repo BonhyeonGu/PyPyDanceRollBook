@@ -1099,7 +1099,16 @@ def get_attendance_correlation():
 
 def get_user_info_by_nickname(cursor, nickname):
     cursor.execute("""
-        SELECT u.user_id, u.nickname, u.comment, COALESCE(uas.total_count, 0), uas.last_attended
+        SELECT
+            u.user_id,
+            u.nickname,
+            u.comment,
+            COALESCE(uas.total_count, 0) AS total_count,
+            (
+                SELECT MAX(a.enter_time)
+                FROM attendance a
+                WHERE a.user_id = u.user_id
+            ) AS last_enter_time
         FROM users u
         LEFT JOIN user_attendance_summary uas ON u.user_id = uas.user_id
         WHERE u.nickname = %s
@@ -1109,7 +1118,7 @@ def get_user_info_by_nickname(cursor, nickname):
     if not row:
         return None
 
-    user_id, nickname, comment, total_count, last_attended = row
+    user_id, nickname, comment, total_count, last_enter_time = row
 
     # 도전과제
     cursor.execute("""
@@ -1125,7 +1134,7 @@ def get_user_info_by_nickname(cursor, nickname):
     ]
 
     # 프로필 이미지
-    img_filename = img_filename = safe_filename(nickname) + ".png"
+    img_filename = safe_filename(nickname) + ".png"
     img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
     if not os.path.exists(img_path):
         img_filename = PROFILE_DEFAULT_FILENAME
@@ -1135,12 +1144,14 @@ def get_user_info_by_nickname(cursor, nickname):
         "nickname": nickname,
         "comment": comment,
         "total_count": total_count,
-        "last_attended": last_attended.strftime("%Y-%m-%d %H:%M") if last_attended else None,
+        "last_attended": last_enter_time.strftime("%Y-%m-%d %H:%M") if last_enter_time else None,
         "img": f"/static/profiles/{img_filename}",
         "achievements": achievements,
     }
 
+
 TOP_N_RANK = 5
+
 
 def compute_topn_threshold_counts(n=TOP_N_RANK, limit_months: int | None = None):
     """
@@ -1214,22 +1225,24 @@ def compute_topn_threshold_counts(n=TOP_N_RANK, limit_months: int | None = None)
 
 
 def compute_all_user_details():
-    """
-    모든 유저 상세 정보를 계산해 dict으로 반환(캐시에 직접 쓰지 않음).
-    - Top-N은 compute_topn_threshold_counts() 결과 포함
-    반환: { nickname: {...details...} }
-    """
-    topn_counts = compute_topn_threshold_counts(n=TOP_N_RANK)  # 필요시 limit_months=12/24 등
+    topn_counts = compute_topn_threshold_counts(n=TOP_N_RANK)
 
     today = date.today()
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            # 기본 정보
+            # ✅ 기본 정보: 마지막 '입장' 시각을 서브쿼리로 가져오기
             cursor.execute("""
-                SELECT u.user_id, u.nickname, u.comment,
-                       COALESCE(uas.total_count, 0) AS total_count,
-                       uas.last_attended
+                SELECT
+                    u.user_id,
+                    u.nickname,
+                    u.comment,
+                    COALESCE(uas.total_count, 0) AS total_count,
+                    (
+                        SELECT MAX(a.enter_time)
+                        FROM attendance a
+                        WHERE a.user_id = u.user_id
+                    ) AS last_enter_time
                 FROM users u
                 LEFT JOIN user_attendance_summary uas ON u.user_id = uas.user_id
             """)
@@ -1281,7 +1294,7 @@ def compute_all_user_details():
         conn.close()
 
     details_by_nick = {}
-    for user_id, nickname, comment, total_count, last_attended in base_rows:
+    for user_id, nickname, comment, total_count, last_enter_time in base_rows:
         img_filename = safe_filename(nickname) + ".png"
         img_path = os.path.join(PROFILE_IMG_DIR, img_filename)
         if not os.path.exists(img_path):
@@ -1303,7 +1316,8 @@ def compute_all_user_details():
             "nickname": nickname,
             "comment": comment,
             "total_count": total_count,
-            "last_attended": last_attended.strftime("%Y-%m-%d %H:%M") if last_attended else None,
+            # ✅ 마지막 '입장' 시각으로 노출
+            "last_attended": last_enter_time.strftime("%Y-%m-%d %H:%M") if last_enter_time else None,
             "img": f"/static/profiles/{img_filename}",
             "achievements": ach_map.get(user_id, []),
 
@@ -1316,7 +1330,6 @@ def compute_all_user_details():
         }
 
     return details_by_nick
-
 
 @app.route("/api/user-details")
 def user_details():

@@ -195,12 +195,8 @@ class UserCardService:
 
     def render_user_card_image(self, stats: dict) -> Image.Image:
         """
-        - 우측(이름+소개) 상단 영역 고정 → 소개가 길어도 아래 선/값 y 고정
-        - 소개 아래: 여백(PRE_STATS_GAP) + 가로선 + 여백(LINE_AFTER_GAP) + 추가여백(GRID_TOP_EXTRA)
-        → 선과 값(첫 줄)이 절대 겹치지 않음
-        - 통계 순서: First joined, Participations, Total time, Achievements (2×2)
-        - Total time: 'Xh Ym'
-        - 워터마크: 오른쪽 모서리에 더 붙임
+        - 왼쪽 전체(푸터 포함)를 프로필 이미지가 가득 채우는 레이아웃
+        - 오른쪽에 이름/소개 + 통계 2x2 + 우측 하단 푸터
         """
         # ===== 캔버스 & 여백 =====
         W, H = 1200, 630
@@ -209,11 +205,10 @@ class UserCardService:
         FOOTER_H = 48
         SAFE_MARGIN = 14
 
-        # ===== 상단(이미지/이름/설명) =====
-        TOP_H = 512
-        IMG_W = 512
+        # ===== 왼쪽 이미지 폭 (전체 높이 H 를 채움) =====
+        LEFT_IMG_W = 512  # 필요하면 420, 450 등으로 조정 가능
 
-        # 우측 패널 상단(이름+소개) 고정 높이
+        # ===== 우측 패널 상단(이름/소개) 고정 높이 =====
         RIGHT_PANEL_FIXED_H = 280  # 소개 길어도 이 높이까지만 사용
 
         # ===== 통계 그리드(2×2, 텍스트만) =====
@@ -230,8 +225,8 @@ class UserCardService:
 
         # ===== '소개 아래' 구분선 & 여백 =====
         PRE_STATS_GAP   = -10   # 선 '위' 여백
-        LINE_AFTER_GAP  = 24   # 선 '아래' 기본 여백
-        GRID_TOP_EXTRA  = 16   # ⬅ 선과 첫 번째 값/라벨이 겹치지 않도록 추가 여백
+        LINE_AFTER_GAP  = 24    # 선 '아래' 기본 여백
+        GRID_TOP_EXTRA  = 16    # ⬅ 선과 첫 번째 값/라벨이 겹치지 않도록 추가 여백
         LINE_COLOR      = (52, 56, 63)
         LINE_WIDTH      = 2
 
@@ -352,18 +347,20 @@ class UserCardService:
             m = (seconds % 3600) // 60
             return (f"{h}h " if h > 0 else "") + f"{m}m"
 
-        # ===== 좌측 배너 =====
-        img_x, img_y = pad, pad
+        # ===== 왼쪽 전체 이미지(푸터 포함) =====
+        img_x, img_y = 0, 0
         avatar_path = self.resolve_profile_image(stats["nickname"])
         try:
             src = Image.open(avatar_path).convert("RGB")
         except Exception:
-            src = Image.new("RGB", (IMG_W, TOP_H), (60, 65, 72))
-        banner = ImageOps.fit(src, (IMG_W, TOP_H), centering=(0.5, 0.5))
+            src = Image.new("RGB", (LEFT_IMG_W, H), (60, 65, 72))
+
+        # 높이 H 전체를 채우도록 크롭/리사이즈
+        banner = ImageOps.fit(src, (LEFT_IMG_W, H), centering=(0.5, 0.5))
         bg.paste(banner, (img_x, img_y))
 
         # ===== 우측 이름/소개 (고정 상단 영역) =====
-        right_x0 = img_x + IMG_W + gap
+        right_x0 = LEFT_IMG_W + pad
         right_x1 = W - pad
         RIGHT_W  = right_x1 - right_x0
         right_y0 = pad
@@ -443,8 +440,9 @@ class UserCardService:
             lbl_y = val_y - lbl_h - LABEL_VALUE_GAP
             draw.text((lbl_x, lbl_y), label_en, font=font_label, fill=(170, 175, 182))
 
-        # ===== 푸터 =====
-        draw.rectangle([0, H - FOOTER_H, W, H], fill=(26, 28, 34))
+        # ===== 푸터 (오른쪽 영역에만) =====
+        # 왼쪽은 이미지 그대로, 오른쪽만 푸터 바 생성
+        draw.rectangle([LEFT_IMG_W, H - FOOTER_H, W, H], fill=(26, 28, 34))
         wm = self.BRAND_WATERMARK
         wm_w, wm_h = text_size(wm, font_wm)
         wm_x = W - WM_RIGHT_PAD - wm_w
